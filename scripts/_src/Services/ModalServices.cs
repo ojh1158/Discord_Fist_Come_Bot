@@ -37,14 +37,36 @@ public class ModalServices : BaseServices
     {
         var customId = modal.Data.CustomId;
         
+        // CustomId 파싱: "{action}_{messageId}" 또는 "{action}_{messageId}_{extra}"
+        // 하위 호환성: "party_{action}_{messageId}" 형식도 지원
         var parts = customId.Split('_');
-        if (parts[0] != "party")
+        if (parts.Length < 2)
             return;
         
-        if (!ulong.TryParse(parts[2], out var messageId))
+        string action;
+        int messageIdIndex;
+        
+        // 이전 형식 지원: "party_{action}_{messageId}"
+        if (parts[0] == "party" && parts.Length >= 3)
+        {
+            action = parts[1];
+            messageIdIndex = 2;
+        }
+        // 새로운 형식: "{action}_{messageId}"
+        else
+        {
+            action = parts[0];
+            messageIdIndex = 1;
+        }
+        
+        if (messageIdIndex >= parts.Length)
             return;
+        
+        var partyKey = parts[messageIdIndex];
 
-        var partyEntity = await PartyService.GetPartyEntityAsync(messageId);
+        await InitCommands(modal, action);
+
+        var partyEntity = await PartyService.GetPartyEntityAsync(partyKey);
 
         var partyClass = new PartyClass();
         await partyClass.Init(partyEntity, modal, Services.client);
@@ -52,10 +74,8 @@ public class ModalServices : BaseServices
 
         var message = "";
 
-        await modal.RespondAsync("작업 중....", ephemeral: true);
-        await partyClass.Init(partyEntity, modal, Services.client);
 
-        switch (parts[1])
+        switch (action)
         {
             case PartyConstant.SETTING_MODEL_KEY:
                 var renameOk = true;
@@ -105,7 +125,7 @@ public class ModalServices : BaseServices
 
                 if (renameOk && name != party.DISPLAY_NAME)
                 {
-                    if (await PartyService.PartyRename(messageId, name))
+                    if (await PartyService.PartyRename(partyKey, name))
                     {
                         message += "제목: 제목을 변경하였습니다.\n";
                         party.DISPLAY_NAME = name;
@@ -182,13 +202,21 @@ public class ModalServices : BaseServices
                     team.WithDescription(string.Join("\n", teamMembers));
                     result.Add(team.Build());
                 }
+                
+                if (modal.HasResponded)
+                {
+                    await modal.DeleteOriginalResponseAsync();
+                }
+                else
+                {
+                    await modal.RespondAsync("생성하였습니다", ephemeral: true);
+                }
 
                 var cb = new ComponentBuilder();
 
                 var mg = await modal.Channel.SendMessageAsync("초기화 중...");
-                cb.WithButton(PartyConstant.TEAM_REMOVE_KEY, $"party_{PartyConstant.TEAM_REMOVE_KEY}_{messageId}_{mg.Id}", ButtonStyle.Danger);
-                
-                await modal.DeleteOriginalResponseAsync();
+                cb.WithButton(PartyConstant.TEAM_REMOVE_KEY, $"{PartyConstant.TEAM_REMOVE_KEY}_{mg.Id}", ButtonStyle.Danger);
+
                 
                 await mg.ModifyAsync(m =>
                 {

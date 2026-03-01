@@ -1,4 +1,6 @@
+using System.Net;
 using Discord;
+using Discord.Rest;
 using Discord.WebSocket;
 using DiscordBot.scripts._src.party;
 using DiscordBot.scripts.db.Models;
@@ -59,8 +61,19 @@ public class DiscordServices : ISingleton
                 .WithDescription($"파티를 생성합니다. 허용 인원은 {PartyConstant.MIN_COUNT}-{PartyConstant.MAX_COUNT} 입니다.")
                 .AddOption("이름", ApplicationCommandOptionType.String, "파티 이름", isRequired: true, minLength: 1, maxLength: PartyConstant.MAX_NAME_COUNT)
                 .AddOption("인원", ApplicationCommandOptionType.Integer, "파티 인원", isRequired: true)
-                // .AddOption("호출", ApplicationCommandOptionType.Role, "해당 역할 소유자에게 알람을 보냅니다", isRequired: false)
-                .AddOption("만료시간", ApplicationCommandOptionType.String, $"파티 만료 시간 ex(15m, 15h, 15분, 15시) 빈 필드: {PartyConstant.MAX_HOUR}시간", isRequired: false)
+                .AddOption(
+                    name: "시작시간설정",
+                    type: ApplicationCommandOptionType.Boolean,
+                    description: "시작 시간을 설정할지 결정합니다. (True = 설정)",
+                    isRequired: true
+                )
+                .AddOption(
+                    name: "채널선택",
+                    type: ApplicationCommandOptionType.Channel,
+                    description: "파티가 모일 채널을 선택하세요.",
+                    channelTypes: [ChannelType.Voice],
+                    isRequired: false
+                )
         };
         
         // 내용이 다르거나 없는 명령어 생성/업데이트
@@ -109,6 +122,7 @@ public class DiscordServices : ISingleton
             
             await originalMessage.ModifyAsync(msg =>
             {
+                msg.Content = null;
                 msg.Embed = updatedEmbed;
                 msg.Components = updatedComponent;
             });
@@ -129,23 +143,68 @@ public class DiscordServices : ISingleton
         }
     }
 
-    public async Task RespondMessageWithExpire(SocketInteraction component, int time = 10, string? message = null)
+    public void MessageWithExpire(IUserMessage message, int time = 10, Action? action = null)
+    {
+        var content = message.Content ?? "";
+        
+        var separator = "\u200B"; // Zero-Width Space
+        var exMessage = $"{separator} (해당 메세지는 {ToDiscordRelativeTimestamp(DateTime.Now.AddSeconds(time))} 삭제됩니다.)";
+
+        message.ModifyAsync(mp => mp.Content = $"{content}{exMessage}");
+        
+        // 백그라운드에서 삭제
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(time));
+
+            try
+            {
+                var channel = message.Channel;
+                if (channel == null) return;
+
+                var latestMessage = await channel.GetMessageAsync(message.Id);
+                if (latestMessage == null) return;
+
+                var old = latestMessage.Content;
+                var s = old.Split(separator)[0];
+                if (s != content)
+                {
+                    return;
+                }
+
+                await latestMessage.DeleteAsync();
+                action?.Invoke();
+            }
+            catch (Discord.Net.HttpException ex) when (ex.HttpCode == HttpStatusCode.NotFound)
+            {
+
+            }
+            catch (Exception ex)
+            {
+                _ = LogAsync(new LogMessage(LogSeverity.Error, "MessageWithExpire", ex.Message));
+            }
+        });
+    }
+
+    public async Task RespondMessageWithExpire(SocketInteraction component, int time = 10, string? message = null, MessageComponent? addComponent = null)
     {
         var separator = "\u200B"; // Zero-Width Space
-        var exMessage = $"{separator} (해당 메세지는 {time}초 후 삭제됩니다.)";
+        var exMessage = $"{separator} (해당 메세지는 {ToDiscordRelativeTimestamp(DateTime.Now.AddSeconds(time))} 삭제됩니다.)";
         
         if (message != null)
         {
             // HasResponded 체크 - 이미 응답했는지 확인
             if (!component.HasResponded)
             {
-                await component.RespondAsync(message + exMessage, ephemeral: true);
+                if (addComponent != null) await component.RespondAsync(message + exMessage, components:addComponent, ephemeral: true);
+                else await component.RespondAsync(message + exMessage, ephemeral: true);
             }
             else
             {
                 await component.ModifyOriginalResponseAsync(m =>
                 {
                     m.Content = message + exMessage;
+                    if (addComponent != null) m.Components = addComponent;
                 });
             }
         }
@@ -162,6 +221,7 @@ public class DiscordServices : ISingleton
             await component.ModifyOriginalResponseAsync(m =>
             {
                 m.Content = message + exMessage;
+                if (addComponent != null) m.Components = addComponent;
             });
         }
         
@@ -220,8 +280,6 @@ public class DiscordServices : ISingleton
 
     public async Task<Embed> UpdatedEmbed(PartyEntity party)
     {
-        var embedList = new List<Embed>();
-        
         var memberList = party.Members.Count > 0 
             ? string.Join("\n", party.Members.Select(member => $"**<@{member.USER_ID}> ({member.USER_NICKNAME})**"))
             : "없음";
@@ -235,7 +293,14 @@ public class DiscordServices : ISingleton
             state = "";
         
         var title = $"**{party.DISPLAY_NAME}** {state}";
-        var description = $"**참가자: {party.Members.Count}/{party.MAX_COUNT_MEMBER}**\n\n{memberList}";
+
+        var stateDate = party.START_DATE.HasValue ? new DatePickerState().FromDateTime(party.START_DATE.Value) : null;
+        var expireDate = party.EXPIRE_DATE.HasValue ? new DatePickerState().FromDateTime(party.EXPIRE_DATE.Value) : null;
+        
+        var description = 
+            $"**시작시간: {(stateDate != null ? ($"{ToDiscordRelativeTimestamp(party.START_DATE!.Value)}") : "없음")} ({stateDate?.ToDisplayString() ?? "###"})**\n" +
+            $"**파티장소: <#{party.VOICE_CHANNEL_KEY}>**\n\n" +
+            $"**참가자: {party.Members.Count}/{party.MAX_COUNT_MEMBER}**\n\n{memberList}";
         
         
         if (party.WaitMembers.Count > 0)
@@ -251,7 +316,7 @@ public class DiscordServices : ISingleton
         }
         
         // 만료시간 추가 (강조 표시)
-        description += $"\n\n\n**만료시간: {party.EXPIRE_DATE:yyyy/MM/dd tt h:mm}**";
+        description += $"\n\n\n**만료시간: {(expireDate != null ? ($"{ToDiscordRelativeTimestamp(party.EXPIRE_DATE!.Value)}") : "없음")} ({expireDate?.ToDisplayString() ?? "###"})**";
         
         var color = Color.Blue;
         if (party.MAX_COUNT_MEMBER == party.Members.Count) color = Color.Green;
@@ -270,8 +335,6 @@ public class DiscordServices : ISingleton
                 .WithColor(color)
                 .WithFooter($"버그제보(Discord): ojh1158 Version: {PartyConstant.VERSION}")
                 .WithCurrentTimestamp();
-            
-        embedList.Add(updatedEmbed.Build());
         
         
         return updatedEmbed.Build();
@@ -297,7 +360,7 @@ public class DiscordServices : ISingleton
 
     public MessageComponent UpdatedComponent(PartyEntity party)
     {
-        var partyKey = party.MESSAGE_KEY;
+        var partyKey = party.PARTY_KEY;
 
         var component = new ComponentBuilder();
         var maxFlag = party.MAX_COUNT_MEMBER <= party.Members.Count;
@@ -309,24 +372,32 @@ public class DiscordServices : ISingleton
             // 인원이 가득 찬 경우
             if (maxFlag)
             {
-                component.WithButton("대기하기", $"party_{PartyConstant.JOIN_KEY}_{partyKey}");
+                component.WithButton("대기하기", $"{PartyConstant.JOIN_KEY}_{partyKey}");
             }
             else
             {
-                component.WithButton(PartyConstant.JOIN_KEY, $"party_{PartyConstant.JOIN_KEY}_{partyKey}", ButtonStyle.Success);
+                component.WithButton(PartyConstant.JOIN_KEY, $"{PartyConstant.JOIN_KEY}_{partyKey}", ButtonStyle.Success);
             }
         }
 
-        component.WithButton(PartyConstant.LEAVE_KEY, $"party_{PartyConstant.LEAVE_KEY}_{partyKey}", ButtonStyle.Danger);
+        component.WithButton(PartyConstant.LEAVE_KEY, $"{PartyConstant.LEAVE_KEY}_{partyKey}", ButtonStyle.Danger);
 
-        component.WithButton(PartyConstant.OPTION_KEY, $"party_{PartyConstant.OPTION_KEY}_{partyKey}", ButtonStyle.Secondary);
+        component.WithButton(PartyConstant.OPTION_KEY, $"{PartyConstant.OPTION_KEY}_{partyKey}", ButtonStyle.Secondary);
         
         return component.Build();
     }
 
     public async Task<bool> ExpirePartyAsync(PartyEntity party, ISocketMessageChannel? channel = null)
     {
-        channel ??= await client.GetChannelAsync(party.CHANNEL_KEY) as ISocketMessageChannel;
+        try{
+            channel = await client.GetChannelAsync(party.CHANNEL_KEY) as ISocketMessageChannel;
+        }
+        catch (Exception)
+        {
+            Console.WriteLine("더 이상 접근할 수 없는 메세지입니다.");
+            await PartyService.ExpirePartyAsync(party.MESSAGE_KEY);
+            return true;
+        }
 
         if (channel == null) return false;
         
@@ -362,5 +433,359 @@ public class DiscordServices : ISingleton
         }
         
         return true;
+    }
+    
+    public string ToDiscordRelativeTimestamp(DateTime kstDateTime)
+    {
+        var kstOffset = TimeSpan.FromHours(9);
+        
+        var unspecifiedDateTime = new DateTime(kstDateTime.Ticks, DateTimeKind.Unspecified);
+        var timeWithOffset = new DateTimeOffset(unspecifiedDateTime, kstOffset);
+        
+        var unixTimestamp = timeWithOffset.ToUnixTimeSeconds();
+        
+        return $"<t:{unixTimestamp}:R>";
+    }
+
+    public MessageComponent GetSettingComponent()
+    {
+        return new ComponentBuilder()
+            .WithButton(PartyConstant.USER_ALERT_SETTING_KEY, $"{PartyConstant.USER_ALERT_SETTING_KEY}_{PartyConstant.USER_ALERT_SETTING_OPEN_KEY}", ButtonStyle.Success)
+            .Build();
+    }
+    
+    public string ToDiscordUserMention(ulong userId) => $"<@{userId}>";
+
+    public void SendUserAlert(PartyEntity partyEntity, IUser user, string action)
+    {
+        Task.Run(async () =>
+        {
+            var allList = new List<PartyMemberEntity>(partyEntity.Members);
+            allList.AddRange(partyEntity.WaitMembers);
+            
+            var dic = allList.ToDictionary(d => d.USER_ID, d => d);
+            
+            switch (action)
+            {
+                case PartyConstant.JOIN_KEY:
+                    if (user.Id != partyEntity.OWNER_KEY)
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            var ownerSetting = await UserService.GetUserSettingAsync(partyEntity.OWNER_KEY);
+
+                            IUser? owner = null;
+                            
+                            if (ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_JOIN_USER_ALERT_FLAG: true })
+                            {
+                                owner ??= await client.GetUserAsync(partyEntity.OWNER_KEY);
+                                _ = owner.SendMessageAsync($"<@{user.Id}>({dic[user.Id].USER_NICKNAME}) 님이 {partyEntity.DISPLAY_NAME} 에 참가하였습니다! {ToLinkChanner(partyEntity)}");
+                            }
+                            
+                            if (allList.Count == partyEntity.MAX_COUNT_MEMBER && ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_FULL_ALERT_FLAG: true })
+                            {
+                                owner ??= await client.GetUserAsync(partyEntity.OWNER_KEY);
+                                _ = owner.SendMessageAsync($"{partyEntity.DISPLAY_NAME} 파티가 모였습니다! {ToLinkChanner(partyEntity)}");
+                            }
+                        });
+                    }
+
+                    if (allList.Count == partyEntity.MAX_COUNT_MEMBER)
+                    {
+                        foreach (var partyEntityMember in partyEntity.Members)
+                        {
+                            if (partyEntityMember.USER_ID != user.Id && partyEntityMember.USER_ID != partyEntity.OWNER_KEY)
+                            {
+                                _ = Task.Run(async () =>
+                                {
+                                    var ownerSetting = await UserService.GetUserSettingAsync(partyEntityMember.USER_ID);
+                            
+                                    if (ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_FULL_ALERT_FLAG: true })
+                                    {
+                                        var otherUser = await client.GetUserAsync(partyEntityMember.USER_ID);
+                                        _ = otherUser.SendMessageAsync($"**{partyEntity.DISPLAY_NAME}** 파티가 모였습니다! {ToLinkChanner(partyEntity)}");
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    
+                    break;
+                case PartyConstant.LEAVE_KEY:
+                    if (user.Id != partyEntity.OWNER_KEY)
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            var ownerSetting = await UserService.GetUserSettingAsync(partyEntity.OWNER_KEY);
+                            
+                            if (ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_JOIN_USER_ALERT_FLAG: true })
+                            {
+                                if (await client.GetChannelAsync(partyEntity.CHANNEL_KEY) is SocketGuildChannel guildChannel)
+                                {
+                                    var owner = await client.Rest.GetGuildUserAsync(guildChannel.Guild.Id, partyEntity.OWNER_KEY);
+                                    _ = owner?.SendMessageAsync($"<@{user.Id}>({(user is SocketGuildUser guildUser ? $"{guildUser.DisplayName}" : $"{user.Username}")}) 님이 {partyEntity.DISPLAY_NAME} 파티에서 나갔습니다. {ToLinkChanner(partyEntity)}");
+                                }
+                            }
+                        });
+                    }
+                    break;
+                case PartyConstant.JOIN_AUTO_KEY:
+                    var target = await PartyService.GetPartyEntityAsync(partyEntity.PARTY_KEY);
+                    if (target != null)
+                    {
+                        foreach (var partyMemberEntity in target.Members)
+                        {
+                            if (partyMemberEntity.USER_ID == user.Id) continue;
+                            
+                            _ = Task.Run(async () =>
+                            {
+                                var userSetting = await UserService.GetUserSettingAsync(partyMemberEntity.USER_ID);
+                            
+                                if (userSetting is { ALL_ALERT_FLAG: true, JOIN_PARTY_TO_WAIT_FLAG: true })
+                                {
+                                    var otherUser = await client.GetUserAsync(partyMemberEntity.USER_ID);
+                                    _ = otherUser.SendMessageAsync($"**{partyEntity.DISPLAY_NAME}** 파티가 모였습니다! {ToLinkChanner(partyEntity)}");
+                                }
+                            });
+                        }
+                    }
+                    break;
+                    
+                case PartyConstant.USER_ALERT_JOIN_PARTY_TO_WAIT_FLAG:
+                    _ = Task.Run(async () =>
+                    {
+                        var userSetting = await UserService.GetUserSettingAsync(user.Id);
+                            
+                        if (userSetting is { ALL_ALERT_FLAG: true, JOIN_PARTY_TO_WAIT_FLAG: true })
+                        {
+                            _ = user.SendMessageAsync($"**{partyEntity.DISPLAY_NAME}** 파티에 빈자리가 생겨 참가되었습니다! {ToLinkChanner(partyEntity)}");
+                        }
+                    });
+                    break;
+            }
+        });
+    }
+
+    public string ToLinkChanner(PartyEntity partyEntity)
+    {
+        return ToLinkChanner(partyEntity.CHANNEL_KEY);
+    }
+
+    public string ToLinkChanner(ulong channelId)
+    {
+        return $"\n(<#{channelId}>)[{ToDiscordRelativeTimestamp(DateTime.Now)}]\n\\\u200B";
+    }
+
+    public Dictionary<string, DatePickerState> dateDic = new();
+    
+    public MessageProperties CreateDatePickup(string title, PartyEntity party, DateTime? time = null, string? guid = null, bool isFirst = false)
+    {
+        dateDic.TryGetValue(guid ?? "", out var datePickerState);
+        
+        var componentBuilder = new ComponentBuilder();
+        var embedBuilder = new EmbedBuilder();
+        
+        var state = datePickerState ?? new DatePickerState();
+        if (time != null) state.FromDateTime(time.Value);
+        var stateId = state.Id;
+        var key = stateId.ToString();
+
+        embedBuilder.WithTitle($"{title}");
+        embedBuilder.WithDescription($"{state.ToDisplayString()} {ToDiscordRelativeTimestamp(state.ToDateTime())}");
+        embedBuilder.WithColor(Color.Blue);
+
+        var dataPickup = $"{(isFirst ? PartyConstant.DATE_PICKUP_FIRST_KEY : PartyConstant.DATE_PICKUP_KEY)}_{party.PARTY_KEY}_{key}_{title}";
+
+        if (state.IsDateDisplay)
+        {
+            // Row 0: 년
+            componentBuilder.WithSelectMenu($"{dataPickup}_{PartyConstant.YEAR_KEY}", GetYearOptions(state.Year), "년도");
+            // Row 1: 월
+            componentBuilder.WithSelectMenu($"{dataPickup}_{PartyConstant.MONTH_KEY}", GetMonthOptions(state.Month), "월");
+            // Row 2: 일
+            componentBuilder.WithSelectMenu($"{dataPickup}_{PartyConstant.DAY_TENS_KEY}", GetDayTensOptions(state.DayTens), "일 (10단위)");
+            componentBuilder.WithSelectMenu($"{dataPickup}_{PartyConstant.DAY_ONES_KEY}", GetDayOnesOptions(state.DayOnes), "일 (1단위)");
+        }
+        else
+        {
+            // Row 3: 시
+            componentBuilder.WithSelectMenu($"{dataPickup}_{PartyConstant.HOUR_KEY}", GetHourOptions(state.Hour), "시");
+            
+            // Row 4: 분
+            componentBuilder.WithSelectMenu($"{dataPickup}_{PartyConstant.MIN_TENS_KEY}", GetMinTensOptions(state.MinTens), "분 (10단위)");
+            componentBuilder.WithSelectMenu($"{dataPickup}_{PartyConstant.MIN_ONES_KEY}", GetMinOnesOptions(state.MinOnes), "분 (1단위)");
+        }
+
+        if (state.IsDateDisplay)
+            componentBuilder.WithButton(PartyConstant.DATE_HOUR_SELECT_KEY,
+                $"{dataPickup}_{PartyConstant.DATE_HOUR_SELECT_KEY}");
+        else
+            componentBuilder.WithButton(PartyConstant.DATE_YEAR_SELECT_KEY,
+                $"{dataPickup}_{PartyConstant.DATE_YEAR_SELECT_KEY}");
+
+        // Row 5: 확인/취소 버튼 (SelectMenu가 4개를 차지했으므로 마지막은 버튼)
+        componentBuilder.WithButton(PartyConstant.DATE_YES, $"{dataPickup}_{PartyConstant.DATE_YES}", ButtonStyle.Success, row: 4);
+        componentBuilder.WithButton(PartyConstant.DATE_NO, $"{dataPickup}_{PartyConstant.DATE_NO}", ButtonStyle.Danger, row: 4);
+
+        dateDic.TryAdd(key, state);
+        
+        return new MessageProperties
+        {
+            Content = "",
+            Components = componentBuilder.Build(),
+            Embed = embedBuilder.Build()
+        };
+    }
+    
+    // 년도: 현재 기준 -1년부터 +5년 정도가 적당합니다.
+    private List<SelectMenuOptionBuilder> GetYearOptions(int current)
+    {
+        var options = new List<SelectMenuOptionBuilder>();
+        int startYear = DateTime.Now.Year;
+        for (int i = startYear; i < startYear + 10; i++) // 향후 10년
+        {
+            options.Add(new SelectMenuOptionBuilder()
+                .WithLabel($"{i}년")
+                .WithValue(i.ToString())
+                .WithDefault(i == current)
+            );
+        }
+        return options;
+    }
+
+    // 월: 1~12월
+    private List<SelectMenuOptionBuilder> GetMonthOptions(int current)
+    {
+        var options = new List<SelectMenuOptionBuilder>();
+        for (int i = 1; i <= 12; i++)
+        {
+            options.Add(new SelectMenuOptionBuilder()
+                .WithLabel($"{i}월")
+                .WithValue(i.ToString())
+                .WithDefault(i == current));
+        }
+        return options;
+    }
+
+    // 시간: 0~23시
+    private List<SelectMenuOptionBuilder> GetHourOptions(int current)
+    {
+        var options = new List<SelectMenuOptionBuilder>();
+        for (int i = 0; i <= 23; i++)
+        {
+            options.Add(new SelectMenuOptionBuilder()
+                .WithLabel($"{i:D2}시") // 01시, 02시 형태
+                .WithValue(i.ToString())
+                .WithDefault(i == current));
+        }
+        return options;
+    }
+
+    // --- '일(Day)' 조립용 ---
+    private List<SelectMenuOptionBuilder> GetDayTensOptions(int current)
+    {
+        var options = new List<SelectMenuOptionBuilder>();
+        int currentTens = (current / 10) * 10;
+        for (int i = 0; i <= 30; i += 10)
+        {
+            options.Add(new SelectMenuOptionBuilder()
+                .WithLabel($"({i.ToString()[0]}N)일")
+                .WithValue(i.ToString())
+                .WithDefault(i == currentTens));
+        }
+        return options;
+    }
+
+    private List<SelectMenuOptionBuilder> GetDayOnesOptions(int current)
+    {
+        var options = new List<SelectMenuOptionBuilder>();
+        int currentOnes = current % 10;
+        for (int i = 0; i <= 9; i++)
+        {
+            options.Add(new SelectMenuOptionBuilder()
+                .WithLabel($"(N{i})일")
+                .WithValue(i.ToString())
+                .WithDefault(i == currentOnes));
+        }
+        return options;
+    }
+
+    // --- '분(Minute)' 조립용 (동일 로직) ---
+    private List<SelectMenuOptionBuilder> GetMinTensOptions(int current)
+    {
+        var options = new List<SelectMenuOptionBuilder>();
+        int currentTens = (current / 10) * 10;
+        for (int i = 0; i <= 50; i += 10)
+        {
+            options.Add(new SelectMenuOptionBuilder().WithLabel($"({i.ToString()[0]}N)분").WithValue(i.ToString()).WithDefault(i == currentTens));
+        }
+        return options;
+    }
+
+    private List<SelectMenuOptionBuilder> GetMinOnesOptions(int current)
+    {
+        var options = new List<SelectMenuOptionBuilder>();
+        for (int i = 0; i <= 9; i++)
+        {
+            options.Add(new SelectMenuOptionBuilder().WithLabel($"(N{i})분").WithValue(i.ToString()).WithDefault(i == (current % 10)));
+        }
+        return options;
+    }
+}
+
+public class DatePickerState
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public int Year { get; set; } = DateTime.Now.Year;
+    public int Month { get; set; } = DateTime.Now.Month;
+    
+    // 조립형 '일' (Day) - 현재 날짜 기준 자동 분리
+    public int DayTens { get; set; } = (DateTime.Now.Day / 10) * 10;
+    public int DayOnes { get; set; } = DateTime.Now.Day % 10;
+    public int FullDay => DayTens + DayOnes;
+
+    public int Hour { get; set; } = DateTime.Now.Hour;
+
+    // 조립형 '분' (Minute) - 현재 분 기준 자동 분리
+    public int MinTens { get; set; } = (DateTime.Now.Minute / 10) * 10;
+    public int MinOnes { get; set; } = 0;
+    public int FullMinute => MinTens + MinOnes;
+    
+    public bool IsDateDisplay { get; set; } = false;
+    
+
+    // 상단 표시용 문자열 (하드코딩)
+    public string ToDisplayString() 
+        => $"{Year}년 {Month}월 {FullDay}일 {Hour}시 {FullMinute}분";
+    
+    public DateTime ToDateTime()
+    {
+        try
+        {
+            // 1. 기본적으로 사용자가 선택한 값으로 생성 시도
+            return new DateTime(Year, Month, FullDay, Hour, FullMinute, 0);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // 2. 만약 2월 31일 처럼 말도 안 되는 날짜면, 해당 월의 마지막 날로 보정
+            int lastDay = DateTime.DaysInMonth(Year, Month);
+            return new DateTime(Year, Month, lastDay, Hour, FullMinute, 0);
+        }
+    }
+
+    /// <summary>DateTime을 받아 이 인스턴스의 년/월/일/시/분 필드를 채웁니다 (ToDateTime의 역연산).</summary>
+    public DatePickerState FromDateTime(DateTime dateTime)
+    {
+        Year = dateTime.Year;
+        Month = dateTime.Month;
+        int day = dateTime.Day;
+        DayTens = (day / 10) * 10;
+        DayOnes = day % 10;
+        Hour = dateTime.Hour;
+        int minute = dateTime.Minute;
+        MinTens = (minute / 10) * 10;
+        MinOnes = minute % 10;
+
+        return this;
     }
 }

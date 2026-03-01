@@ -18,7 +18,12 @@ public class PartyEntity
     public List<PartyMemberEntity> Members { get; set; } = new();
     public List<PartyMemberEntity> WaitMembers { get; set; } = new();
     
-    public DateTime EXPIRE_DATE { get; set; }
+    public DateTime? EXPIRE_DATE { get; set; }
+    public DateTime? START_DATE { get; set; } = null;
+    
+    public ulong? VOICE_CHANNEL_KEY { get; set; } = null;
+    
+    
     public bool IS_CLOSED { get; set; } = false;
     public bool IS_EXPIRED { get; set; } = false;
 }

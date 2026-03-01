@@ -1,3 +1,4 @@
+using Discord.Rest;
 using Discord.WebSocket;
 using DiscordBot.scripts._src.party;
 using DiscordBot.scripts.db.Models;
@@ -14,6 +15,10 @@ public class SlashCommandServices : BaseServices
 
     private async Task HandleSlashCommandAsync(SocketSlashCommand command)
     {
+        await command.RespondAsync("초기화 중입니다...", ephemeral: true);
+        var message = await command.GetOriginalResponseAsync();
+        
+        
         var commandName = command.Data.Name;
         
         if (command.Channel is SocketGuildChannel guildChannel)
@@ -24,135 +29,132 @@ public class SlashCommandServices : BaseServices
             // 필요한 권한 체크 (채널 보기 & 메시지 보내기)
             if (!permissions.ViewChannel)
             {
-                await command.RespondAsync("🚫 이 채널에 대한 접근 권한이 없습니다. 권한을 확인해주세요.", ephemeral: true);
+                await message.ModifyAsync(mp => mp.Content = "🚫 이 채널에 대한 접근 권한이 없습니다. 권한을 확인해주세요.");
                 return;
             }
 
             if (!permissions.SendMessages)
             {
-                await command.RespondAsync("🚫 이 채널에 대한 메시지 전송 권한이 없습니다. 권한을 확인해주세요.", ephemeral: true);
+                await message.ModifyAsync(mp => mp.Content = "🚫 이 채널에 대한 메시지 전송 권한이 없습니다. 권한을 확인해주세요.");
                 return;
             }
 
             // 메시지 기록 보기 권한 체크
             if (!permissions.ReadMessageHistory)
             {
-                await command.RespondAsync("🚫 이 채널의 '메시지 기록 보기' 권한이 없습니다.", ephemeral: true);
+                await message.ModifyAsync(mp => mp.Content = "🚫 이 채널의 '메시지 기록 보기' 권한이 없습니다.");
                 return;
             }
             
             if (!await GuildService.GuildCheckAsync(guildChannel.Id, guildChannel.Guild.Name))
             {
-                await command.RespondAsync("🚫 이 채널을 검증할 수 없거나 제한되었습니다.", ephemeral: true);
+                await message.ModifyAsync(mp => mp.Content = "🚫 이 채널을 검증할 수 없거나 제한되었습니다.");
                 return;
             }
         }
         else
         {
-            await command.RespondAsync("서버에서만 사용 가능합니다.", ephemeral: true);
+            await message.ModifyAsync(mp => mp.Content = "서버에서만 사용 가능합니다.");
             return;
         }
         
         if (commandName != "파티")
         {
-            await command.RespondAsync("알 수 없는 명령입니다.", ephemeral: true);
+            await message.ModifyAsync(mp => mp.Content = "알 수 없는 명령입니다.");
             return;
         }
         
         var commandOptions = command.Data.Options;
         var nameOption = commandOptions.FirstOrDefault(x => x.Name == "이름");
         var countOption = commandOptions.FirstOrDefault(x => x.Name == "인원");
-        var timeOption = commandOptions.FirstOrDefault(x => x.Name == "만료시간");
-        // var collOption = commandOptions.FirstOrDefault(x => x.Name == "호출");
+        var choseChannel = commandOptions.FirstOrDefault(x => x.Name == "채널선택")?.Value as SocketVoiceChannel;
+        var startTimeSetFlag = commandOptions.FirstOrDefault(opt => opt.Name == "시작시간설정")?.Value as bool? ?? false;
         
         if (nameOption?.Value == null || countOption?.Value == null || !int.TryParse(countOption.Value.ToString(), out var count))
         {
-            await command.RespondAsync("명령어에 오류가 있습니다.", ephemeral: true);
+            await message.ModifyAsync(mp => mp.Content = "명령어에 오류가 있습니다.");
             return;
         }
 
         if (count is < PartyConstant.MIN_COUNT or > PartyConstant.MAX_COUNT)
         {
-            await command.RespondAsync($"파티 인원은 최소 {PartyConstant.MIN_COUNT} 최대 {PartyConstant.MAX_COUNT}까지만 지정할 수 있습니다.", ephemeral: true);
+            await message.ModifyAsync(mp => mp.Content = $"파티 인원은 최소 {PartyConstant.MIN_COUNT} 최대 {PartyConstant.MAX_COUNT}까지만 지정할 수 있습니다.");
             return;
         }
                 
         var partyName = nameOption.Value.ToString()!;
         
-        if (await PartyService.IsPartyExistsAsync(partyName, (ulong)command.GuildId!))
-        {
-            await command.RespondAsync("해당 파티 이름이 이미 있습니다.", ephemeral: true);
-            return;
-        }
+        // 중복 파티 딱히 상관없음....
+        // if (await PartyService.IsPartyExistsAsync(partyName, (ulong)command.GuildId!))
+        // {
+        //     await message.ModifyAsync(mp => mp.Content = "해당 파티 이름이 이미 있습니다.");
+        //     return;
+        // }
 
-        var time = TimeSpan.FromHours(PartyConstant.MAX_HOUR);
-
-        if (timeOption?.Value != null)
+        RestUserMessage msg;
+        
+        if (startTimeSetFlag)
         {
-            var timeString = timeOption.Value.ToString()!.ToLower();
-            if (!int.TryParse(timeString[..1], out var number))
+            msg = await command.Channel.SendMessageAsync($"{Services.ToDiscordUserMention(command.User.Id)} 님이 {partyName} 파티 설정을 하고 있습니다! 잠시만 기다려 주세요...");
+            Services.MessageWithExpire(msg, 300, () =>
             {
-                await command.RespondAsync("시간 형식이 알맞지 않습니다!", ephemeral: true);
-                return;
-            }
-            
-            switch (timeString[^1])
-            {
-                case 'm' or '분' :
-                    time = TimeSpan.FromMinutes(number);
-                    break;
-                case 'h' or '시':
-                    time = TimeSpan.FromHours(number);
-                    break;
-                default:
-                    await command.RespondAsync("시간 형식이 알맞지 않습니다!", ephemeral: true);
-                    return;
-            }
+                PartyService.ExpirePartyAsync(msg.Id);
+            });
         }
-        
-
-        if (time >= TimeSpan.FromHours(PartyConstant.MAX_HOUR))
+        else
         {
-            time = TimeSpan.FromHours(PartyConstant.MAX_HOUR);
+            msg = await command.Channel.SendMessageAsync($"초기화 중입니다...");
         }
         
-        await command.RespondAsync("초기화 중입니다...");
-        var message = await command.GetOriginalResponseAsync();
-        
-        var now = DateTime.Now;
         var party = new PartyEntity
         {
             DISPLAY_NAME = partyName,
             PARTY_KEY = Guid.NewGuid().ToString(),
             MAX_COUNT_MEMBER = count,
-            MESSAGE_KEY = message.Id,
+            MESSAGE_KEY = msg.Id,
             GUILD_KEY = (ulong)command.GuildId!,
             CHANNEL_KEY = (ulong)command.ChannelId!,
             OWNER_KEY = command.User.Id,
             OWNER_NICKNAME = command.User is SocketGuildUser user
                 ? user.DisplayName
                 : command.User.Username,
-            EXPIRE_DATE = now.AddSeconds(-now.Second).AddMilliseconds(-now.Millisecond).Add(time),
+            EXPIRE_DATE = null,
+            VOICE_CHANNEL_KEY = choseChannel?.Id
         };
         
         if (!await PartyService.CreatePartyAsync(party))
         {
             await message.DeleteAsync();
-            await command.FollowupAsync("파티 생성에 실패하였습니다.", ephemeral: true);
+            await command.ModifyOriginalResponseAsync(mp => mp.Content = "파티 생성에 실패하였습니다.");
             await Services.RespondMessageWithExpire(command);
             return;
         }
 
-        var updatedEmbed = await Services.UpdatedEmbed(party);
-        var component = Services.UpdatedComponent(party);
-        
-        await message.ModifyAsync(m =>
+        if (startTimeSetFlag)
         {
-            m.Embed = updatedEmbed;
-            m.Components = component;
-            m.Content = "";
-        });
+            var datePickup = Services.CreateDatePickup(PartyConstant.START_TIME_OPEN_KEY, party);
+            
+            await message.ModifyAsync(mp =>
+            {
+                mp.Content = datePickup.Content;
+                mp.Embed = datePickup.Embed;
+                mp.Components = datePickup.Components;
+            });
+        }
+        else
+        {
+            var updatedEmbed = await Services.UpdatedEmbed(party);
+            var component = Services.UpdatedComponent(party);
 
-        var me = await command.FollowupAsync("파티를 생성하였습니다!", ephemeral: true);
+            await msg.ModifyAsync(m =>
+            {
+                m.Content = "";
+                m.Embed = updatedEmbed;
+                m.Components = component;
+            });
+            
+            await message.ModifyAsync(mp => mp.Content = "파티를 생성하였습니다!");
+            Services.MessageWithExpire(message);
+        }
     }
 }

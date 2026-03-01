@@ -25,8 +25,8 @@ public class PartyRepository
         }
         
         var partySql = @"
-INSERT INTO PARTY (DISPLAY_NAME, PARTY_KEY, MAX_COUNT_MEMBER, MESSAGE_KEY, GUILD_KEY, CHANNEL_KEY, OWNER_KEY, OWNER_NICKNAME, EXPIRE_DATE, IS_CLOSED)
-VALUES (@DISPLAY_NAME, @PARTY_KEY, @MAX_COUNT_MEMBER, @MESSAGE_KEY, @GUILD_KEY, @CHANNEL_KEY, @OWNER_KEY, @OWNER_NICKNAME, @EXPIRE_DATE, 0)
+INSERT INTO PARTY (DISPLAY_NAME, PARTY_KEY, MAX_COUNT_MEMBER, MESSAGE_KEY, GUILD_KEY, CHANNEL_KEY, OWNER_KEY, OWNER_NICKNAME, EXPIRE_DATE, IS_CLOSED, VOICE_CHANNEL_KEY)
+VALUES (@DISPLAY_NAME, @PARTY_KEY, @MAX_COUNT_MEMBER, @MESSAGE_KEY, @GUILD_KEY, @CHANNEL_KEY, @OWNER_KEY, @OWNER_NICKNAME, @EXPIRE_DATE, 0, @VOICE_CHANNEL_KEY)
 ";
         
         // 명시적으로 파라미터 전달하여 Dapper 매핑 문제 방지
@@ -40,7 +40,8 @@ VALUES (@DISPLAY_NAME, @PARTY_KEY, @MAX_COUNT_MEMBER, @MESSAGE_KEY, @GUILD_KEY, 
             party.CHANNEL_KEY,
             party.OWNER_KEY,
             party.OWNER_NICKNAME,
-            party.EXPIRE_DATE
+            party.EXPIRE_DATE,
+            party.VOICE_CHANNEL_KEY
         };
         
         var affectedRows = await connection.ExecuteAsync(partySql, parameters, transaction: transaction);
@@ -72,7 +73,7 @@ SELECT EXISTS(
         }
     }
 
-    public static async Task<PartyEntity?> GetPartyEntityNotMember(ulong messageKey, MySqlConnection connection, MySqlTransaction transaction)
+    public static async Task<PartyEntity?> GetPartyEntityNotMember(string partyKey, MySqlConnection connection, MySqlTransaction? transaction = null)
     {
         try
         {
@@ -90,13 +91,15 @@ SELECT
     OWNER_KEY,
     OWNER_NICKNAME,
     EXPIRE_DATE,
+    START_DATE,
+    VOICE_CHANNEL_KEY,
     IS_CLOSED,
     IS_EXPIRED
 FROM PARTY 
-WHERE MESSAGE_KEY = @MessageKey
+WHERE PARTY_KEY = @partyKey
 AND IS_EXPIRED = FALSE
 ",
-                new { MessageKey = messageKey },
+                new { partyKey },
                 transaction: transaction
             );
 
@@ -109,7 +112,7 @@ AND IS_EXPIRED = FALSE
         }
     }
 
-    public static async Task<List<PartyMemberEntity>> GetPartyMemberList(string id, MySqlConnection connection, MySqlTransaction transaction)
+    public static async Task<List<PartyMemberEntity>> GetPartyMemberList(string id, MySqlConnection connection, MySqlTransaction? transaction = null)
     {
         try
         {
@@ -133,7 +136,7 @@ ORDER BY CREATE_DATE
         }
     }
 
-    public static async Task<List<PartyMemberEntity>> GetPartyWaitMemberList(string id, MySqlConnection connection, MySqlTransaction transaction)
+    public static async Task<List<PartyMemberEntity>> GetPartyWaitMemberList(string id, MySqlConnection connection, MySqlTransaction? transaction = null)
     {
         try
         {
@@ -157,7 +160,7 @@ ORDER BY CREATE_DATE
         }
     }
     
-    public static async Task<List<PartyMemberEntity>> GetPartyAllMemberList(string id, MySqlConnection connection, MySqlTransaction transaction)
+    public static async Task<List<PartyMemberEntity>> GetPartyAllMemberList(string id, MySqlConnection connection, MySqlTransaction? transaction = null)
     {
         List<PartyMemberEntity> result = [];
         
@@ -365,7 +368,7 @@ WHERE MESSAGE_KEY = @MessageKey
         }
     }
 
-    public static async Task<bool> SetPartyClose(ulong messageId, bool isClose, MySqlConnection connection, MySqlTransaction transaction)
+    public static async Task<bool> SetPartyClose(string partyKey, bool isClose, MySqlConnection connection, MySqlTransaction transaction)
     {
 
         try
@@ -373,11 +376,11 @@ WHERE MESSAGE_KEY = @MessageKey
             var sql = @"
 UPDATE PARTY
 SET IS_CLOSED = @isClose
-WHERE MESSAGE_KEY = @MESSAGE_KEY
+WHERE PARTY_KEY = @partyKey
     ";
             
             var affectedRows = await connection.ExecuteAsync(sql,
-                new { MESSAGE_KEY = messageId , isClose = isClose ? 1 : 0 },
+                new { partyKey , isClose = isClose ? 1 : 0 },
                 transaction: transaction);
 
             return affectedRows > 0;
@@ -389,7 +392,7 @@ WHERE MESSAGE_KEY = @MESSAGE_KEY
         }
     }
     
-    public static async Task<bool> PartyRename(ulong messageKey, string newName, MySqlConnection connection, MySqlTransaction transaction)
+    public static async Task<bool> PartyRename(string partyKey, string newName, MySqlConnection connection, MySqlTransaction transaction)
     {
 
         try
@@ -397,11 +400,11 @@ WHERE MESSAGE_KEY = @MESSAGE_KEY
             var sql = @"
 UPDATE PARTY
 SET DISPLAY_NAME= @newName
-WHERE MESSAGE_KEY = @messageKey
+WHERE PARTY_KEY = @partyKey
     ";
             
             var affectedRows = await connection.ExecuteAsync(sql,
-                new { messageKey , newName },
+                new { partyKey , newName },
                 transaction: transaction);
 
             return affectedRows > 0;
@@ -438,8 +441,9 @@ WHERE MESSAGE_KEY = @MESSAGE_KEY
 
 
 
-    public static async Task<List<PartyEntity>> CycleExpiredPartyList(MySqlConnection connection, MySqlTransaction transaction)
+    public static async Task<List<PartyEntity>> CycleExpiredPartyList()
     {
+        MySqlConnection connection = await DatabaseController.GetConnectionAsync();
         try
         {
             // 만료 시간이 지난 파티 목록 조회
@@ -461,8 +465,7 @@ SELECT
 FROM PARTY 
 WHERE IS_EXPIRED = FALSE
 AND EXPIRE_DATE <= NOW()
-",
-                transaction: transaction)).ToList();
+")).ToList();
 
             if (!parties.Any())
             {
@@ -511,5 +514,54 @@ WHERE PARTY_KEY = @id
             return false;
         }
     }
+    
+    public static async Task<bool> SetStartDate(string partyKey, DateTime dateTime, MySqlConnection connection, MySqlTransaction transaction)
+    {
+
+        try
+        {
+            var sql = @"
+UPDATE PARTY
+SET START_DATE= @dateTime
+WHERE PARTY_KEY = @partyKey
+    ";
+            
+            var affectedRows = await connection.ExecuteAsync(sql,
+                new { partyKey , dateTime },
+                transaction: transaction);
+
+            return affectedRows > 0;
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            return false;
+        }
+    }
+    
+    public static async Task<bool> SetExpireDate(string partyKey, DateTime dateTime, MySqlConnection connection, MySqlTransaction transaction)
+    {
+
+        try
+        {
+            var sql = @"
+UPDATE PARTY
+SET EXPIRE_DATE= @dateTime
+WHERE PARTY_KEY = @partyKey
+    ";
+            
+            var affectedRows = await connection.ExecuteAsync(sql,
+                new { partyKey , dateTime },
+                transaction: transaction);
+
+            return affectedRows > 0;
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            return false;
+        }
+    }
+    
 }
 

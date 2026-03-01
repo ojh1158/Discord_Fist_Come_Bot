@@ -1,7 +1,7 @@
-using MySqlConnector;
+using System.Data;
 using System.Reflection;
 using Dapper;
-using System.Data;
+using MySqlConnector;
 
 namespace DiscordBot.scripts.db;
 
@@ -53,17 +53,12 @@ public class DatabaseController : IDisposable
         }
     }
 
-    /// <summary>
-    /// Connection 획득 (내부용, Lock 없음)
-    /// </summary>
-    private static async Task<MySqlConnection> GetConnectionAsync()
+    public static async Task<MySqlConnection> GetConnectionAsync()
     {
-        if (_connection == null || _connection.State != System.Data.ConnectionState.Open)
-        {
-            _connection = new MySqlConnection(_connectionString);
-            await _connection.OpenAsync();
-        }
-        return _connection;
+        // 매번 새로운 연결 객체를 생성하여 반환합니다.
+        var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        return connection;
     }
     
     /// <summary>
