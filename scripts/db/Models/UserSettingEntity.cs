@@ -23,6 +23,6 @@ public class UserSettingEntity
     public bool PARTY_START_TIME_ALERT_FLAG { get; set; } = true;
 
     /// <summary>전체 알림 꺼져 있으면 대기 참가 여부</summary>
-    public bool JOIN_PARTY_TO_WAIT_FLAG { get; set; } = false;
+    public bool JOIN_PARTY_TO_WAIT_FLAG { get; set; } = true;
     
 }
