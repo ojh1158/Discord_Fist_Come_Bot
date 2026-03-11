@@ -9,7 +9,7 @@ public class PartyConstant
     
     public const int MAX_NAME_COUNT = 50;
     
-    public const string VERSION = "2.0.";
+    public const string VERSION = "2.0.3";
 
     public const string JOIN_KEY = "참가";
     public const string LEAVE_KEY = "나가기";
