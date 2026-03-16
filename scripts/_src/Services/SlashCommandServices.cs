@@ -3,17 +3,40 @@ using Discord.WebSocket;
 using DiscordBot.scripts._src.party;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Services;
+using Serilog;
 
 namespace DiscordBot.scripts._src.Services;
 
 public class SlashCommandServices : BaseServices
 {
-    public SlashCommandServices(DiscordServices services) : base(services)
+    private readonly GuildService guildService;
+    private readonly PartyService partyService;
+    public SlashCommandServices(DiscordServices services, GuildService guildService, PartyService partyService) : base(services)
     {
         Services.client.SlashCommandExecuted += HandleSlashCommandAsync;
+        this.guildService = guildService;
+        this.partyService = partyService;
     }
 
     private async Task HandleSlashCommandAsync(SocketSlashCommand command)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await SlashCommandAsync(command);
+            }
+            catch (Exception e)
+            {
+                Log.Error($"{e.Message}\n{e.StackTrace}");
+            }
+        });
+
+        await Task.CompletedTask;
+    }
+    
+
+    private async Task SlashCommandAsync(SocketSlashCommand command)
     {
         await command.RespondAsync("초기화 중입니다...", ephemeral: true);
         var message = await command.GetOriginalResponseAsync();
@@ -46,7 +69,7 @@ public class SlashCommandServices : BaseServices
                 return;
             }
             
-            if (!await GuildService.GuildCheckAsync(guildChannel.Id, guildChannel.Guild.Name))
+            if (!await guildService.GuildCheckAsync(guildChannel.Id, guildChannel.Guild.Name))
             {
                 await message.ModifyAsync(mp => mp.Content = "🚫 이 채널을 검증할 수 없거나 제한되었습니다.");
                 return;
@@ -76,9 +99,9 @@ public class SlashCommandServices : BaseServices
             return;
         }
 
-        if (count is < PartyConstant.MIN_COUNT or > PartyConstant.MAX_COUNT)
+        if (count is < Constant.MIN_COUNT or > Constant.MAX_COUNT)
         {
-            await message.ModifyAsync(mp => mp.Content = $"파티 인원은 최소 {PartyConstant.MIN_COUNT} 최대 {PartyConstant.MAX_COUNT}까지만 지정할 수 있습니다.");
+            await message.ModifyAsync(mp => mp.Content = $"파티 인원은 최소 {Constant.MIN_COUNT} 최대 {Constant.MAX_COUNT}까지만 지정할 수 있습니다.");
             return;
         }
                 
@@ -98,7 +121,7 @@ public class SlashCommandServices : BaseServices
             msg = await command.Channel.SendMessageAsync($"{Services.ToDiscordUserMention(command.User.Id)} 님이 {partyName} 파티 설정을 하고 있습니다! 잠시만 기다려 주세요...");
             Services.MessageWithExpire(msg, 300, () =>
             {
-                PartyService.ExpirePartyAsync(msg.Id);
+                partyService.ExpirePartyAsync(msg.Id);
             });
         }
         else
@@ -122,7 +145,7 @@ public class SlashCommandServices : BaseServices
             VOICE_CHANNEL_KEY = choseChannel?.Id
         };
         
-        if (!await PartyService.CreatePartyAsync(party))
+        if (!await partyService.CreatePartyAsync(party))
         {
             await message.DeleteAsync();
             await command.ModifyOriginalResponseAsync(mp => mp.Content = "파티 생성에 실패하였습니다.");
@@ -132,7 +155,7 @@ public class SlashCommandServices : BaseServices
 
         if (startTimeSetFlag)
         {
-            var datePickup = Services.CreateDatePickup(PartyConstant.START_TIME_OPEN_KEY, party);
+            var datePickup = Services.CreateDatePickup(Constant.START_TIME_OPEN_KEY, party);
             
             await message.ModifyAsync(mp =>
             {

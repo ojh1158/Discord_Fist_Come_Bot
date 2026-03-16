@@ -4,6 +4,7 @@ using Discord.WebSocket;
 using DiscordBot.scripts._src.party;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Services;
+using Serilog;
 
 namespace DiscordBot.scripts._src.Services;
 
@@ -28,12 +29,34 @@ public class ModalServices : BaseServices
         Color.DarkMagenta,
     };
     
-    public ModalServices(DiscordServices services) : base(services)
+    private readonly PartyService partyService;
+    
+    public ModalServices(DiscordServices services, PartyService partyService) : base(services)
     {
         Services.client.ModalSubmitted += HandleModalAsync;
+        this.partyService = partyService;
+    }
+
+    private async Task HandleModalAsync(SocketModal modal)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ModalAsync(modal);
+            }
+            catch (Exception e)
+            {
+                Log.Error($"{e.Message}\n{e.StackTrace}");
+            }
+        });
+
+        await Task.CompletedTask;
     }
     
-    private async Task HandleModalAsync(SocketModal modal)
+    
+    
+    private async Task ModalAsync(SocketModal modal)
     {
         var customId = modal.Data.CustomId;
         
@@ -66,7 +89,7 @@ public class ModalServices : BaseServices
 
         await InitCommands(modal, action);
 
-        var partyEntity = await PartyService.GetPartyEntityAsync(partyKey);
+        var partyEntity = await partyService.GetPartyEntityAsync(partyKey);
 
         var partyClass = new PartyClass();
         await partyClass.Init(partyEntity, modal, Services.client);
@@ -77,7 +100,7 @@ public class ModalServices : BaseServices
 
         switch (action)
         {
-            case PartyConstant.SETTING_MODEL_KEY:
+            case Constant.SETTING_MODEL_KEY:
                 var renameOk = true;
                 var resizeOk = true;
                 
@@ -93,9 +116,9 @@ public class ModalServices : BaseServices
                 if (party.MAX_COUNT_MEMBER != teamCount)
                 {
                     // 범위 체크
-                    if (teamCount < 1 || teamCount > PartyConstant.MAX_COUNT)
+                    if (teamCount < 1 || teamCount > Constant.MAX_COUNT)
                     {
-                        message += $"인원 오류: 파티 인원은 {1}~{PartyConstant.MAX_COUNT} 사이여야 합니다.\n";
+                        message += $"인원 오류: 파티 인원은 {1}~{Constant.MAX_COUNT} 사이여야 합니다.\n";
                         resizeOk = false;
                     }
 
@@ -107,10 +130,8 @@ public class ModalServices : BaseServices
 
                     if (resizeOk)
                     {
-                        var (members, waitMember) = await PartyService.ResizePartyAsync(party, teamCount);
-
-                        party.Members = members;
-                        party.WaitMembers = waitMember;
+                        await partyService.ResizePartyAsync(party, teamCount);
+                        
                         party.MAX_COUNT_MEMBER = teamCount;
                         message += $"인원: 인원을 변경하였습니다.\n";
                     }
@@ -125,7 +146,7 @@ public class ModalServices : BaseServices
 
                 if (renameOk && name != party.DISPLAY_NAME)
                 {
-                    if (await PartyService.PartyRename(partyKey, name))
+                    if (await partyService.PartyRename(partyKey, name))
                     {
                         message += "제목: 제목을 변경하였습니다.\n";
                         party.DISPLAY_NAME = name;
@@ -143,7 +164,7 @@ public class ModalServices : BaseServices
                 await modal.ModifyOriginalResponseAsync(m => m.Content = message);
                 _ = Services.RespondMessageWithExpire(modal); 
                 break;
-            case PartyConstant.TEAM_KEY:
+            case Constant.TEAM_KEY:
                 countInput = modal.Data.Components.FirstOrDefault(c => c.CustomId == "count");
 
                 if (countInput == null || !int.TryParse(countInput.Value, out teamCount))
@@ -215,7 +236,7 @@ public class ModalServices : BaseServices
                 var cb = new ComponentBuilder();
 
                 var mg = await modal.Channel.SendMessageAsync("초기화 중...");
-                cb.WithButton(PartyConstant.TEAM_REMOVE_KEY, $"{PartyConstant.TEAM_REMOVE_KEY}_{mg.Id}", ButtonStyle.Danger);
+                cb.WithButton(Constant.TEAM_REMOVE_KEY, $"{Constant.TEAM_REMOVE_KEY}_{mg.Id}", ButtonStyle.Danger);
 
                 
                 await mg.ModifyAsync(m =>

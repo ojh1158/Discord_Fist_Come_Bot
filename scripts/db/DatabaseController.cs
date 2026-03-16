@@ -1,18 +1,17 @@
 using System.Data;
 using System.Reflection;
 using Dapper;
+using DiscordBot.scripts._src;
 using MySqlConnector;
+using Serilog;
 
 namespace DiscordBot.scripts.db;
 
-public class DatabaseController : IDisposable
+public class DatabaseController : IDisposable, ISingleton
 {
     private static string _connectionString = string.Empty;
-    private static MySqlConnection? _connection;
-
-    // 전역 DB Lock (모든 DB 접근을 순차적으로 제어)
-    private static readonly SemaphoreSlim _dbLock = new SemaphoreSlim(1, 1);
-
+    private MySqlConnection? _connection;
+    
     public static void Init()
     {
         _connectionString = Environment.GetEnvironmentVariable("DATABASE__CONNECTIONSTRING") 
@@ -33,7 +32,7 @@ public class DatabaseController : IDisposable
             parameter.DbType = DbType.Binary;
         }
 
-        public override Guid Parse(object value)
+        public override Guid Parse(object? value)
         {
             if (value == null || value == DBNull.Value)
             {
@@ -53,7 +52,7 @@ public class DatabaseController : IDisposable
         }
     }
 
-    public static async Task<MySqlConnection> GetConnectionAsync()
+    public async Task<MySqlConnection> GetConnectionAsync()
     {
         // 매번 새로운 연결 객체를 생성하여 반환합니다.
         var connection = new MySqlConnection(_connectionString);
@@ -62,186 +61,73 @@ public class DatabaseController : IDisposable
     }
     
     /// <summary>
-    /// DB 작업을 Lock 내에서 실행 (반환값 있음)
-    /// Connection을 자동으로 제공하고 Lock 적용
-    /// </summary>
-    public static async Task<T> ExecuteAsync<T>(Func<MySqlConnection, Task<T>> action)
-    {
-        await _dbLock.WaitAsync();
-        try
-        {
-            var connection = await GetConnectionAsync();
-            return await action(connection);
-        }
-        finally
-        {
-            _dbLock.Release();
-        }
-    }
-    
-    /// <summary>
-    /// DB 작업을 Lock 내에서 실행 (반환값 없음)
-    /// Connection을 자동으로 제공하고 Lock 적용
-    /// </summary>
-    public static async Task ExecuteAsync(Func<MySqlConnection, Task> action)
-    {
-        await _dbLock.WaitAsync();
-        try
-        {
-            var connection = await GetConnectionAsync();
-            await action(connection);
-        }
-        finally
-        {
-            _dbLock.Release();
-        }
-    }
-    
-    /// <summary>
     /// DB 작업을 트랜잭션 내에서 실행 (반환값 있음)
     /// Connection과 Transaction을 자동으로 제공하고 Lock 적용
     /// 성공 시 자동 Commit, 실패 시 자동 Rollback
     /// </summary>
-    public static async Task<T?> ExecuteInTransactionAsync<T>(Func<MySqlConnection, MySqlTransaction, Task<T?>> action)
+    public async Task<T?> ExecuteInTransactionAsync<T>(Func<MySqlConnection, MySqlTransaction, Task<T?>> action)
     {
-        await _dbLock.WaitAsync();
+        // 각 트랜잭션을 구분하기 위한 고유 ID 생성
+        string txId = Guid.NewGuid().ToString()[..8]; 
+        var startTime = DateTime.Now;
+
         try
         {
-            var connection = await GetConnectionAsync();
+            Log.Debug($"[TX-{txId}] 연결 시도 중...");
+            await using var connection = await GetConnectionAsync();
+        
+            Log.Debug($"[TX-{txId}] 트랜잭션 시작 중...");
             await using var transaction = await connection.BeginTransactionAsync();
-            
+
             try
             {
+                Log.Information($"[TX-{txId}] 로직 실행 시작 (T: {typeof(T).Name})");
+            
                 var result = await action.Invoke(connection, transaction);
+            
+                Log.Debug($"[TX-{txId}] 커밋 시도 중...");
                 await transaction.CommitAsync();
+            
+                var duration = DateTime.Now - startTime;
+                Log.Information($"[TX-{txId}] 성공 및 커밋 완료 ({duration.TotalMilliseconds}ms)");
                 return result;
             }
             catch (Exception ex)
             {
+                Log.Warning($"[TX-{txId}] 로직 오류 발생! 롤백 진행. 메시지: {ex.Message}");
                 await transaction.RollbackAsync();
-                Console.WriteLine(ex.Message);
-                return default;
-            }
-        }
-        finally
-        {
-            _dbLock.Release();
-        }
-    }
-
-    /// <summary>
-    /// 파라미터화된 비쿼리 실행 (INSERT, UPDATE, DELETE)
-    /// </summary>
-    public static async Task<int> ExecuteNonQueryAsync(string sql, Dictionary<string, object>? parameters = null)
-    {
-        var connection = await GetConnectionAsync();
-        using var command = new MySqlCommand(sql, connection);
-        
-        if (parameters != null)
-        {
-            foreach (var param in parameters)
-            {
-                command.Parameters.AddWithValue(param.Key, param.Value);
-            }
-        }
-        
-        return await command.ExecuteNonQueryAsync();
-    }
-
-    /// <summary>
-    /// 스칼라 값 조회 (COUNT, SUM 등)
-    /// </summary>
-    public static async Task<object?> ExecuteScalarAsync(string sql, Dictionary<string, object>? parameters = null)
-    {
-        var connection = await GetConnectionAsync();
-        using var command = new MySqlCommand(sql, connection);
-        
-        if (parameters != null)
-        {
-            foreach (var param in parameters)
-            {
-                command.Parameters.AddWithValue(param.Key, param.Value);
-            }
-        }
-        
-        return await command.ExecuteScalarAsync();
-    }
-
-    /// <summary>
-    /// 비파라미터 쿼리 실행 (하위 호환성 유지)
-    /// </summary>
-    public static async Task NonQuery(string sql)
-    {
-        await ExecuteNonQueryAsync(sql);
-    }
-
-    /// <summary>
-    /// SELECT 쿼리 결과를 제네릭 타입 리스트로 반환
-    /// </summary>
-    public static async Task<List<T>> Query<T>(string sql, Dictionary<string, object>? parameters = null) where T : new()
-    {
-        var connection = await GetConnectionAsync();
-        var result = new List<T>();
-
-        using var command = new MySqlCommand(sql, connection);
-        
-        if (parameters != null)
-        {
-            foreach (var param in parameters)
-            {
-                command.Parameters.AddWithValue(param.Key, param.Value);
-            }
-        }
-        
-        using var reader = await command.ExecuteReaderAsync();
-
-        var properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
-        while (await reader.ReadAsync())
-        {
-            var item = new T();
-            foreach (var prop in properties)
-            {
-                try
+            
+                // 데드락 관련 예외인지 체크
+                if (ex is MySqlException { Number: 1213 }) 
                 {
-                    var ordinal = reader.GetOrdinal(prop.Name);
-                    if (!reader.IsDBNull(ordinal))
-                    {
-                        var value = reader.GetValue(ordinal);
-                        
-                        // 타입 변환 처리 개선
-                        if (prop.PropertyType == typeof(bool) && value is sbyte sbyteValue)
-                        {
-                            prop.SetValue(item, sbyteValue != 0);
-                        }
-                        else if (prop.PropertyType == typeof(bool?) && value is sbyte nullableSbyteValue)
-                        {
-                            prop.SetValue(item, nullableSbyteValue != 0);
-                        }
-                        else
-                        {
-                            prop.SetValue(item, Convert.ChangeType(value, Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType));
-                        }
-                    }
+                    Log.Fatal($"🚨 [TX-{txId}] 데드락(Deadlock) 감지됨!");
                 }
-                catch
-                {
-                    // 컬럼이 없거나 타입 변환 실패 시 무시
-                }
+            
+                throw; // 상위 catch에서 처리하도록 던짐
             }
-            result.Add(item);
         }
-
-        return result;
+        catch (Exception ex)
+        {
+            Log.Error($"[TX-{txId}] 트랜잭션 작업 중 최종 예외 발생: {ex.Message}\n{ex.StackTrace}");
+            return default;
+        }
     }
-
-    /// <summary>
-    /// 단일 결과를 제네릭 타입으로 반환
-    /// </summary>
-    public static async Task<T?> QuerySingle<T>(string sql, Dictionary<string, object>? parameters = null) where T : new()
+    
+    public async Task<T?> ExecuteAsync<T>(Func<MySqlConnection, Task<T?>> action)
     {
-        var results = await Query<T>(sql, parameters);
-        return results.FirstOrDefault();
+        try
+        {
+            // 1. 연결을 생성하고 사용 후 자동으로 닫히도록 await using 사용
+            await using var connection = await GetConnectionAsync();
+        
+            // 2. 전달받은 로직 실행
+            return await action.Invoke(connection);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[ExecuteAsync Error] {ex.Message}");
+            return default;
+        }
     }
     
     public void Dispose()
@@ -249,27 +135,8 @@ public class DatabaseController : IDisposable
         DisposeDatabase();
     }
 
-    public static void DisposeDatabase()
+    public void DisposeDatabase()
     {
         _connection?.Dispose();
-    }
-    
-    public class QueryResult<T>
-    {
-        public T? Value;
-        public bool IsError;
-        public string? Error;
-
-        public void Result(Action<T> action, Action<string> error)
-        {
-            if (IsError && Value != null)
-            {
-                action.Invoke(Value);
-            }
-            else
-            {
-                error.Invoke(Error ?? string.Empty);
-            }
-        }
     }
 }

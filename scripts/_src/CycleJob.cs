@@ -1,19 +1,14 @@
 using Discord;
-using Quartz;
+using DiscordBot.scripts._src.Services;
 using DiscordBot.scripts.db.Services;
+using Quartz;
+using Serilog;
 
-namespace DiscordBot.scripts._src.Services;
+namespace DiscordBot.scripts._src;
 
 [DisallowConcurrentExecution]
-public class CycleJob : IJob
+public class CycleJob(PartyService partyService, DiscordServices discordServices, UserService userService) : IJob
 {
-    private readonly DiscordServices _discordServices;
-
-    public CycleJob(DiscordServices discordServices)
-    {
-        _discordServices = discordServices;
-    }
-
     public Task Execute(IJobExecutionContext context)
     {
         CheckExpiredParty();
@@ -28,27 +23,26 @@ public class CycleJob : IJob
             try
             {
                 var executeTime = DateTime.UtcNow;
-                Console.WriteLine($"[Cycle] 만료 파티 체크 시작 (시간: {executeTime:HH:mm:ss} UTC)");
+                Log.Information($"[Cycle] 만료 파티 체크 시작 (시간: {executeTime:HH:mm:ss} UTC)");
             
-                var partyList = await PartyService.CycleExpiredPartyListAsync();
+                var partyList = await partyService.CycleExpiredPartyListAsync();
             
                 if (partyList is { Count: > 0 })
                 {
-                    Console.WriteLine($"[Cycle] {partyList.Count}개의 만료 파티 발견");
+                    Log.Information($"[Cycle] {partyList.Count}개의 만료 파티 발견");
                     foreach (var partyEntity in partyList)
                     {
-                        await _discordServices.ExpirePartyAsync(partyEntity);
+                        await discordServices.ExpirePartyAsync(partyEntity);
                     }
                 }
                 else
                 {
-                    Console.WriteLine("[Cycle] 만료된 파티가 없습니다.");
+                    Log.Information("[Cycle] 만료된 파티가 없습니다.");
                 }
             }
             catch (Exception e)
             {
-                Console.WriteLine($"[Cycle] 오류 발생: {e.Message}");
-                Console.WriteLine(e);
+                Log.Error($"{e.Message}\n{e.StackTrace}");
                 throw; // Quartz가 재시도할 수 있도록 예외 전파
             }
         });
@@ -58,20 +52,19 @@ public class CycleJob : IJob
     {
         Task.Run(async () =>
         {
-            var alertUsers = await UserService.GetAlertUsers();
+            var alertUsers = await userService.GetAlertUsers();
             
             foreach (var entity in alertUsers)
             {
                 try
                 {
-                    var user = await _discordServices.client.Rest.GetUserAsync(entity.USER_ID);
+                    var user = await discordServices.client.Rest.GetUserAsync(entity.USER_ID);
                     
-                    _ = user.SendMessageAsync($"**{entity.DISPLAY_NAME}** 파티 시작 5분 전입니다! {_discordServices.ToLinkChanner(entity.CHANNEL_KEY)}");
+                    _ = user.SendMessageAsync($"**{entity.DISPLAY_NAME}** 파티 시작 5분 전입니다! {discordServices.ToLinkChanner(entity.CHANNEL_KEY)}");
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"[SendAlert] 오류 발생: {e.Message}");
-                    Console.WriteLine(e);
+                    Log.Error($"{e.Message}\n{e.StackTrace}");
                 }
                 
             }

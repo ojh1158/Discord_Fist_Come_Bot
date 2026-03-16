@@ -34,12 +34,14 @@ public class PartyClass
         {
             return "길드 채팅에서만 사용할 수 있습니다.";
         }
+
+        var findIndex = Entity.Members.FindIndex(m => m.USER_ID == userId);
         
         guildUser = user;
         isAdmin = user.GuildPermissions is { Administrator: true };
-        isWater = Entity.WaitMembers.Any(x => x.USER_ID == userId);
-        isPartyMember = Entity.Members.Any(x => x.USER_ID == userId);
-        isNone = !isAdmin && !isWater && !isPartyMember && !isOwner;
+        isWater = findIndex > partyEntity.MAX_COUNT_MEMBER;
+        isPartyMember = findIndex <= partyEntity.MAX_COUNT_MEMBER;
+        isNone = !isAdmin && !isWater && findIndex == -1;
         
         // 길드에서 최신 유저 정보를 가져와서 닉네임 확인 (Rest API 사용)
         try
@@ -73,7 +75,7 @@ public class PartyClass
         
         userRoleString = "일반";
 
-        var isMaker = user.Id is PartyConstant.MAKE_USER_ID;
+        var isMaker = user.Id is Constant.MAKE_USER_ID;
         if (isWater)
             userRoleString = "대기자";
         if (isPartyMember)

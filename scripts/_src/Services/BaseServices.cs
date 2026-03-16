@@ -14,13 +14,13 @@ public class BaseServices(DiscordServices services) : ISingleton
     {
         switch (action)
         {
-            case PartyConstant.PARTY_KEY or PartyConstant.TEAM_KEY:
+            case Constant.PARTY_KEY or Constant.TEAM_KEY:
                 break;
             default:
                 if (!component.HasResponded && action is
-                        not PartyConstant.JOIN_KEY
-                        and not PartyConstant.LEAVE_KEY
-                        and not PartyConstant.OPTION_KEY
+                        not Constant.JOIN_KEY
+                        and not Constant.LEAVE_KEY
+                        and not Constant.OPTION_KEY
                    )
                 {
                     try

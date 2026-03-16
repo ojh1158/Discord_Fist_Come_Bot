@@ -4,16 +4,38 @@ using DiscordBot.scripts._src.party;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Repositories;
 using DiscordBot.scripts.db.Services;
+using Serilog;
 
 namespace DiscordBot.scripts._src.Services;
 
 public class MenuServices : BaseServices
 {
-    public MenuServices(DiscordServices services) : base(services)
+    private readonly PartyService partyService;
+    
+    public MenuServices(DiscordServices services, PartyService partyService) : base(services)
     {
         Services.client.SelectMenuExecuted += HandleSelectMenuAsync;
+        this.partyService = partyService;
     }
+
     private async Task HandleSelectMenuAsync(SocketMessageComponent component)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await SelectMenuAsync(component);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{ex.Message}\n{ex.StackTrace}");
+            }
+        });
+
+        await Task.CompletedTask;
+    }
+    
+    private async Task SelectMenuAsync(SocketMessageComponent component)
     {
         var customId = component.Data.CustomId;
         
@@ -49,7 +71,7 @@ public class MenuServices : BaseServices
         
         await InitCommands(component, action);
         // 파티 정보 가져오기
-        var partyEntity = await PartyService.GetPartyEntityAsync(partyKey);
+        var partyEntity = await partyService.GetPartyEntityAsync(partyKey);
 
         if (partyEntity == null)
         {
@@ -65,9 +87,9 @@ public class MenuServices : BaseServices
         var selectedValues = component.Data.Values; // string[] 배열
         switch (action)
         {
-            case PartyConstant.JOIN_AUTO_KEY:
+            case Constant.JOIN_AUTO_KEY:
 
-                if (action == PartyConstant.JOIN_AUTO_KEY)
+                if (action == Constant.JOIN_AUTO_KEY)
                 {
                     if (partyEntity == null)
                     {
@@ -129,7 +151,7 @@ public class MenuServices : BaseServices
                                     }
                                 }
 
-                                var type = await PartyService.JoinPartyAsync(partyEntity, userId, name);
+                                var tu = await partyService.JoinPartyAsync(partyEntity.PARTY_KEY, userId, name);
                                 addCount++;
 
                                 if (!IsFullAlart)
@@ -140,7 +162,7 @@ public class MenuServices : BaseServices
                                 // 파티에 유저 추가 로직
                                 if (message == null)
                                     message = "";
-                                message += $"{name} : {type.GetComment()}\n";
+                                message += $"{name} : {tu.type.GetComment()}\n";
                             }
                         }
                     }
@@ -157,13 +179,13 @@ public class MenuServices : BaseServices
                         allMessageFlag = true;
                         allmessage = $"{partyClass.userRoleString}님이 다음 파티원을 초대하였습니다!\n" + message;
                         if (IsFullAlart)
-                            Services.SendUserAlert(partyEntity, component.User, PartyConstant.JOIN_AUTO_KEY);
+                            Services.SendUserAlert(partyEntity, component.User, Constant.JOIN_AUTO_KEY);
                         await component.DeleteOriginalResponseAsync();
                     }
                 }
 
                 break;
-            case PartyConstant.KICK_KEY:
+            case Constant.KICK_KEY:
 
                 var ms = "";
 
@@ -187,7 +209,7 @@ public class MenuServices : BaseServices
                     {
                         if (dic.TryGetValue(userId, out var value))
                         {
-                            tasks.Add(PartyService.KickMemberAsync(partyEntity, userId));
+                            tasks.Add(partyService.KickMemberAsync(partyEntity, userId));
                             ms += $"{value.USER_NICKNAME} 님을 추방하였습니다.\n";
                         }
                     }
@@ -197,8 +219,9 @@ public class MenuServices : BaseServices
 
                 await component.DeleteOriginalResponseAsync();
                 await component.Channel.SendMessageAsync($"{partyClass.userNickname} 님이 아래의 파티원을 추방하였습니다.\n" + ms);
+
                 break;
-            case PartyConstant.MOVE_OWNER_KEY:
+            case Constant.MOVE_OWNER_KEY:
                 var select = selectedValues.FirstOrDefault();
 
                 if (select == null & !ulong.TryParse(select, out var result))
@@ -229,7 +252,7 @@ public class MenuServices : BaseServices
                     return;
                 }
 
-                if (await PartyService.SetOwner(partyKey, result, getUser.DisplayName))
+                if (await partyService.SetOwner(partyKey, result, getUser.DisplayName))
                 {
                     partyEntity.OWNER_KEY = getUser.Id;
                     _ = Task.Run(async () =>
@@ -260,7 +283,7 @@ public class MenuServices : BaseServices
                 }
 
                 break;
-            case PartyConstant.DATE_PICKUP_KEY or PartyConstant.DATE_PICKUP_FIRST_KEY:
+            case Constant.DATE_PICKUP_KEY or Constant.DATE_PICKUP_FIRST_KEY:
                 var guid = parts[2];
                 var title = parts[3];
                 var dateAction = parts[4];
@@ -274,25 +297,25 @@ public class MenuServices : BaseServices
                 
                 switch (dateAction)
                 {
-                    case PartyConstant.YEAR_KEY:
+                    case Constant.YEAR_KEY:
                         date.Year = int.Parse(s);  // 2025
                         break;
-                    case PartyConstant.MONTH_KEY:
+                    case Constant.MONTH_KEY:
                         date.Month = int.Parse(s);  // 1~12
                         break;
-                    case PartyConstant.DAY_TENS_KEY:
+                    case Constant.DAY_TENS_KEY:
                         date.DayTens = int.Parse(s);  // 0, 10, 20, 30
                         break;
-                    case PartyConstant.DAY_ONES_KEY:
+                    case Constant.DAY_ONES_KEY:
                         date.DayOnes = int.Parse(s);  // 0~9
                         break;
-                    case PartyConstant.HOUR_KEY:
+                    case Constant.HOUR_KEY:
                         date.Hour = int.Parse(s);  // 0~23
                         break;
-                    case PartyConstant.MIN_TENS_KEY:
+                    case Constant.MIN_TENS_KEY:
                         date.MinTens = int.Parse(s);  // 0, 10, ..., 50
                         break;
-                    case PartyConstant.MIN_ONES_KEY:
+                    case Constant.MIN_ONES_KEY:
                         date.MinOnes = int.Parse(s);  // 0~9
                         break;
                 }
@@ -309,7 +332,7 @@ public class MenuServices : BaseServices
                 return;
         }
         
-        var party = await PartyService.GetPartyEntityAsync(partyKey);
+        var party = await partyService.GetPartyEntityAsync(partyKey);
 
         if (party != null)
         {

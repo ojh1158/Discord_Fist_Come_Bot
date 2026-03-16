@@ -1,3 +1,5 @@
+using DiscordBot.scripts._src;
+using DiscordBot.scripts._src.Services;
 using DiscordBot.scripts.db.Repositories;
 
 namespace DiscordBot.scripts.db.Services;
@@ -5,16 +7,13 @@ namespace DiscordBot.scripts.db.Services;
 /// <summary>
 /// 길드 비즈니스 로직 처리 (Service Layer)
 /// </summary>
-public class GuildService
+public class GuildService(DatabaseController databaseController, GuildRepository guildRepository) : ISingleton
 {
-    /// <summary>
-    /// 길드 체크 (등록 또는 업데이트)
-    /// </summary>
-    public static Task<bool> GuildCheckAsync(ulong guildId, string guildName)
+    public Task<bool> GuildCheckAsync(ulong guildId, string guildName)
     {
-        return DatabaseController.ExecuteInTransactionAsync(async (conn, trans) =>
+        return databaseController.ExecuteInTransactionAsync(async (conn, trans) =>
         {
-            return await GuildRepository.GuildCheck(guildId, guildName, conn, trans);
+            return await guildRepository.GuildCheck(guildId, guildName, conn, trans);
         });
     }
 }

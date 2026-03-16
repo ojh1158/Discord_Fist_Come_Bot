@@ -1,7 +1,7 @@
 namespace DiscordBot.scripts._src.party;
 
 // ReSharper disable once ClassNeverInstantiated.Global
-public class PartyConstant
+public class Constant
 {
     public const int MIN_COUNT = 1;
     public const int MAX_COUNT = 200;
@@ -9,7 +9,7 @@ public class PartyConstant
     
     public const int MAX_NAME_COUNT = 50;
     
-    public const string VERSION = "2.0.4";
+    public const string VERSION = "2.1.0";
 
     public const string JOIN_KEY = "참가";
     public const string LEAVE_KEY = "나가기";
