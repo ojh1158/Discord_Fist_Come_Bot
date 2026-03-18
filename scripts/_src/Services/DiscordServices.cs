@@ -490,7 +490,6 @@ public class DiscordServices : ISingleton
         Task.Run(async () =>
         {
             var allList = new List<PartyMemberEntity>(partyEntity.Members);
-            allList.AddRange(partyEntity.WaitMembers);
             
             var dic = allList.ToDictionary(d => d.USER_ID, d => d);
             var memberOnly = partyEntity.MemberOnly;
@@ -563,7 +562,7 @@ public class DiscordServices : ISingleton
                     var target = await partyService.GetPartyEntityAsync(partyEntity.PARTY_KEY);
                     if (target != null)
                     {
-                        foreach (var partyMemberEntity in memberOnly)
+                        foreach (var partyMemberEntity in target.MemberOnly)
                         {
                             if (partyMemberEntity.USER_ID == user.Id) continue;
                             

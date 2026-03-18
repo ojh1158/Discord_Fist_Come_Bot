@@ -126,7 +126,7 @@ public class ButtonServices : BaseServices
 
                     isAddSettingButton = true;
                     
-                    Services.SendUserAlert(partyEntity!, component.User, action);
+                    Services.SendUserAlert(party, component.User, action);
                     
                     party = await partyService.GetPartyEntityAsync(party.PARTY_KEY);
                 }
