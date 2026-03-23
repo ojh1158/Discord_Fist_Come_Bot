@@ -618,7 +618,7 @@ public class DiscordServices : ISingleton
         if (!time.HasValue)
         {
             var t = DateTime.Now.AddHours(1);
-            state.FromDateTime(t.Date.AddHours(1));
+            state.FromDateTime(t.Date.AddHours(t.Hour));
         }
         var stateId = state.Id;
         var key = stateId.ToString();
