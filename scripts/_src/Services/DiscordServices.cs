@@ -511,7 +511,7 @@ public class DiscordServices : ISingleton
                                 _ = owner.SendMessageAsync($"<@{user.Id}>({dic[user.Id].USER_NICKNAME}) 님이 {partyEntity.DISPLAY_NAME} 에 참가하였습니다! {ToLinkChanner(partyEntity)}");
                             }
                             
-                            if (memberOnly.Count == partyEntity.MAX_COUNT_MEMBER && ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_FULL_ALERT_FLAG: true })
+                            if (partyEntity.Members.Count == partyEntity.MAX_COUNT_MEMBER && ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_FULL_ALERT_FLAG: true })
                             {
                                 owner ??= await client.GetUserAsync(partyEntity.OWNER_KEY);
                                 _ = owner.SendMessageAsync($"{partyEntity.DISPLAY_NAME} 파티가 모였습니다! {ToLinkChanner(partyEntity)}");
@@ -519,7 +519,7 @@ public class DiscordServices : ISingleton
                         });
                     }
 
-                    if (memberOnly.Count == partyEntity.MAX_COUNT_MEMBER)
+                    if (partyEntity.Members.Count == partyEntity.MAX_COUNT_MEMBER)
                     {
                         foreach (var partyEntityMember in memberOnly)
                         {

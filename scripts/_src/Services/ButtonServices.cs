@@ -140,12 +140,22 @@ public class ButtonServices : BaseServices
                 break;
                 
             case Constant.LEAVE_KEY:
-                party = await partyService.LeavePartyAsync(party, partyClass.userId);
-                if (party != null)
+                var afterParty = await partyService.LeavePartyAsync(party, partyClass.userId);
+                if (afterParty != null)
                 {
                     message = $"❌ {party.DISPLAY_NAME} 파티에서 나갔습니다.";
                     
                     Services.SendUserAlert(partyEntity!, component.User, action);
+                    if (party.Members.Count > party.MAX_COUNT_MEMBER)
+                    {
+                        var userEntity = party.Members[party.MAX_COUNT_MEMBER];
+
+                        var user = await Services.client.Rest.GetUserAsync(userEntity.USER_ID);
+                        
+                        Services.SendUserAlert(afterParty, user, Constant.USER_ALERT_JOIN_PARTY_TO_WAIT_FLAG);
+                    }
+                    
+                    party = afterParty;
                 }
                 else
                 {

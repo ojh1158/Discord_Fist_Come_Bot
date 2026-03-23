@@ -156,7 +156,7 @@ public class MenuServices : BaseServices
 
                                 if (!IsFullAlart)
                                 {
-                                    IsFullAlart = partyEntity.Members.Count + addCount == partyEntity.MAX_COUNT_MEMBER;
+                                    IsFullAlart = partyEntity.Members.Count < partyEntity.MAX_COUNT_MEMBER && partyEntity.Members.Count + addCount >= partyEntity.MAX_COUNT_MEMBER;
                                 }
 
                                 // 파티에 유저 추가 로직
