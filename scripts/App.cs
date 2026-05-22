@@ -1,11 +1,10 @@
 using System.Reflection;
 using Discord;
 using Discord.WebSocket;
-using DiscordBot.scripts._src;
-using DiscordBot.scripts._src.Services;
 using DiscordBot.scripts.config;
 using DiscordBot.scripts.db;
 using DiscordBot.scripts.db.DB_SETUP;
+using DiscordBot.scripts.src;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -17,21 +16,32 @@ namespace DiscordBot.scripts;
 public class App
 {
     public static bool IsTest = false;
-    static async Task Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
-        IsTest = args.Length >= 1 && args[0] == "test";
-        
-        LogConfig.Init();
-        DatabaseController.Init();
+         IsTest = args is ["test", ..];
+         
+         var configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
+         var config = File.Exists(configPath) 
+             ? System.Text.Json.JsonSerializer.Deserialize<ConfigClass>(await File.ReadAllTextAsync(configPath))
+             : new ConfigClass();
+
+         if (config is null)
+         {
+             Log.Error("Failed to load config.json");
+             return 0;
+         }
+         
+         LogConfig.Init(config);
+         DatabaseController.Init(config);
         
         // .NET 9.0 최신 방식: HostApplicationBuilder 사용
-        var builder = Host.CreateApplicationBuilder(args);
+         var builder = Host.CreateApplicationBuilder(args);
 
-        var config = new DiscordSocketConfig
-        {
-            GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent,
-            LogLevel = LogSeverity.Info
-        };
+         var discordConfig = new DiscordSocketConfig
+          {
+             GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent,
+             LogLevel = LogSeverity.Info
+          };
 
         var assembly = Assembly.GetExecutingAssembly();
 
@@ -44,9 +54,10 @@ public class App
                 type.Namespace != null)
             .ToList();
 
-        var serviceCollection = builder.Services;
-        serviceCollection
-            .AddSingleton(new DiscordSocketClient(config))
+         var serviceCollection = builder.Services;
+         serviceCollection.AddSingleton(config);
+         serviceCollection
+              .AddSingleton(new DiscordSocketClient(discordConfig))
             .AddQuartz()
             .AddLogging(configure =>
             {
@@ -115,6 +126,7 @@ public class App
         
         // 프로그램이 종료되지 않도록 대기
         await host.RunAsync();
+        return 0;
     }
 }
 

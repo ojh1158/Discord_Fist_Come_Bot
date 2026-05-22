@@ -1,4 +1,4 @@
-namespace DiscordBot.scripts._src.util;
+namespace DiscordBot.scripts.src.util;
 
 public static class ExtensionMethods
 {

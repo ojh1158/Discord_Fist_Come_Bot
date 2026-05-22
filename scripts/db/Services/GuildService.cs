@@ -1,6 +1,5 @@
-using DiscordBot.scripts._src;
-using DiscordBot.scripts._src.Services;
 using DiscordBot.scripts.db.Repositories;
+using DiscordBot.scripts.src;
 
 namespace DiscordBot.scripts.db.Services;
 

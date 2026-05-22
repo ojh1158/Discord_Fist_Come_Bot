@@ -1,6 +1,6 @@
-using DiscordBot.scripts._src;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Repositories;
+using DiscordBot.scripts.src;
 using MySqlConnector;
 
 namespace DiscordBot.scripts.db.Services;

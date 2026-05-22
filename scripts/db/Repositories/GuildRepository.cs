@@ -1,7 +1,7 @@
 using Dapper;
-using DiscordBot.scripts._src;
 using MySqlConnector;
 using DiscordBot.scripts.db.Models;
+using DiscordBot.scripts.src;
 using Serilog;
 
 namespace DiscordBot.scripts.db.Repositories;

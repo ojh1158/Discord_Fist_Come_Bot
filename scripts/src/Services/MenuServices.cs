@@ -1,12 +1,11 @@
 using Discord;
 using Discord.WebSocket;
-using DiscordBot.scripts._src.party;
 using DiscordBot.scripts.db.Models;
-using DiscordBot.scripts.db.Repositories;
 using DiscordBot.scripts.db.Services;
+using DiscordBot.scripts.src.party;
 using Serilog;
 
-namespace DiscordBot.scripts._src.Services;
+namespace DiscordBot.scripts.src.Services;
 
 public class MenuServices : BaseServices
 {

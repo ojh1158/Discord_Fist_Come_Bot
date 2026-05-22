@@ -1,4 +1,4 @@
-namespace DiscordBot.scripts._src.party;
+namespace DiscordBot.scripts.src.party;
 
 public enum JoinType
 {

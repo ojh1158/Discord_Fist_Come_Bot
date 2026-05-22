@@ -1,8 +1,8 @@
 using MySqlConnector;
-using DiscordBot.scripts._src;
 using Dapper;
-using DiscordBot.scripts._src.party;
 using DiscordBot.scripts.db.Models;
+using DiscordBot.scripts.src;
+using DiscordBot.scripts.src.party;
 using Serilog;
 
 namespace DiscordBot.scripts.db.Repositories;

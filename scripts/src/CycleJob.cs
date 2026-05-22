@@ -1,10 +1,10 @@
 using Discord;
-using DiscordBot.scripts._src.Services;
 using DiscordBot.scripts.db.Services;
+using DiscordBot.scripts.src.Services;
 using Quartz;
 using Serilog;
 
-namespace DiscordBot.scripts._src;
+namespace DiscordBot.scripts.src;
 
 [DisallowConcurrentExecution]
 public class CycleJob(PartyService partyService, DiscordServices discordServices, UserService userService) : IJob

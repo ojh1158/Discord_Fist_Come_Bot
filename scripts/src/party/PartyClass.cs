@@ -1,7 +1,7 @@
 using Discord.WebSocket;
 using DiscordBot.scripts.db.Models;
 
-namespace DiscordBot.scripts._src.party;
+namespace DiscordBot.scripts.src.party;
 
 public class PartyClass
 {
@@ -81,7 +81,7 @@ public class PartyClass
         if (isPartyMember)
             userRoleString = "파티원";
         if (isMaker)
-            userRoleString = "슈퍼방장..?";
+            userRoleString = "슈퍼방장";
         if (isAdmin)
             userRoleString = "관리자";
         if (isOwner)

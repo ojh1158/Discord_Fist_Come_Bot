@@ -33,3 +33,4 @@ test_config.json
 # Keep example files
 !config.example.json
 !.env.example
+/build_and_send.ps1

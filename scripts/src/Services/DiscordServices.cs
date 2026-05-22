@@ -1,14 +1,14 @@
 using System.Net;
 using Discord;
-using Discord.Rest;
 using Discord.WebSocket;
-using DiscordBot.scripts._src.party;
-using DiscordBot.scripts._src.util;
+using DiscordBot.scripts.config;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Services;
+using DiscordBot.scripts.src.party;
+using DiscordBot.scripts.src.util;
 using Serilog;
 
-namespace DiscordBot.scripts._src.Services;
+namespace DiscordBot.scripts.src.Services;
 
 
 public class DiscordServices : ISingleton
@@ -17,22 +17,21 @@ public class DiscordServices : ISingleton
     public readonly PartyService partyService;
     public readonly UserService userService;
 
-    public DiscordServices(DiscordSocketClient discord, PartyService partyService, UserService userService)
+    public DiscordServices(DiscordSocketClient discord, PartyService partyService, UserService userService,
+        ConfigClass config)
     {
         client = discord;
         this.partyService = partyService;
         this.userService = userService;
-        
 
         _ = Task.Run(async () =>
         {
             client.Log += LogAsync;
             client.Ready += () => ReadyAsync(client);
 
-            // 봇 로그인 및 시작 - 테스트 모드면 TEST_DISCORD_TOKEN 사용
             var token = App.IsTest
-                ? Environment.GetEnvironmentVariable("TEST_DISCORDTOKEN")
-                : Environment.GetEnvironmentVariable("DISCORDTOKEN");
+                ? (config?.Discord?.TestToken ?? string.Empty)
+                : config?.Discord?.Token ?? string.Empty;
 
             if (string.IsNullOrEmpty(token))
             {
@@ -423,6 +422,9 @@ public class DiscordServices : ISingleton
 
         component.WithButton(Constant.OPTION_KEY, $"{Constant.OPTION_KEY}_{partyKey}", ButtonStyle.Secondary);
 
+        component.WithButton(Constant.PULLING_UP_KEY,$"{Constant.PULLING_UP_KEY}_{partyKey}", ButtonStyle.Success);
+
+        
         return component.Build();
     }
 
@@ -615,7 +617,7 @@ public class DiscordServices : ISingleton
         var embedBuilder = new EmbedBuilder();
         
         var state = datePickerState ?? new DatePickerState();
-        if (!time.HasValue)
+        if (!time.HasValue && datePickerState is null)
         {
             var t = DateTime.Now.AddHours(1);
             state.FromDateTime(t.Date.AddHours(t.Hour));

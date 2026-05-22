@@ -1,0 +1,15 @@
+{
+   "Discord": {
+     "Token": "your-discord-token-here",
+     "TestToken": "test-discord-token-here",
+     "BotName": "Come Bot"
+   },
+   "Database": {
+     "ConnectionString": "Server=localhost;Database=discord_bot;User=root;Password=your-password;",
+     "TestConnectionString": "Server=localhost;Database=discord_bot_test;User=root;Password=your-password;"
+   },
+   "Logging": {
+     "LogLevel": "Information",
+     "LogPath": "logs/"
+   }
+}

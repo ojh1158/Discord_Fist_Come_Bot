@@ -1,8 +1,7 @@
-using Discord;
 using Discord.WebSocket;
-using DiscordBot.scripts._src.party;
+using DiscordBot.scripts.src.party;
 
-namespace DiscordBot.scripts._src.Services;
+namespace DiscordBot.scripts.src.Services;
 
 public class BaseServices(DiscordServices services) : ISingleton
 {

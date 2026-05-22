@@ -1,6 +1,6 @@
 using Dapper;
-using DiscordBot.scripts._src;
 using DiscordBot.scripts.db.Models;
+using DiscordBot.scripts.src;
 using MySqlConnector;
 using Serilog;
 
@@ -80,10 +80,10 @@ INSERT INTO PARTY_START_ALERT_HISTORY (
 PARTY_KEY,
 SEND_TIME
 ) VALUES (
-         @PARTY_KEY, now()
-     ) AS new
+    @PARTY_KEY, now()
+)
 ON DUPLICATE KEY UPDATE
-SEND_TIME = new.SEND_TIME,
+SEND_TIME = VALUES(SEND_TIME),
 CHANGE_TIME_FLAG = FALSE
 ";
         var parameters = new

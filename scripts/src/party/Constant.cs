@@ -1,4 +1,4 @@
-namespace DiscordBot.scripts._src.party;
+namespace DiscordBot.scripts.src.party;
 
 // ReSharper disable once ClassNeverInstantiated.Global
 public class Constant
@@ -9,7 +9,7 @@ public class Constant
     
     public const int MAX_NAME_COUNT = 50;
     
-    public const string VERSION = "2.1.4";
+    public const string VERSION = "2.1.6";
 
     public const string JOIN_KEY = "참가";
     public const string LEAVE_KEY = "나가기";
@@ -22,7 +22,7 @@ public class Constant
     
     public const string SETTING_MODEL_KEY = "setting";
     
-    public const string PULLING_UP_KEY = "끌어올리기";
+    public const string PULLING_UP_KEY = "끌올";
     public const string EXPIRE_KEY = "만료(영구)";
     public const string PING_KEY = "호출(파티원)";
     public const string PARTY_KEY = "파티설정";

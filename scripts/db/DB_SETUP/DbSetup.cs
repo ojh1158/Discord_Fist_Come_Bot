@@ -1,5 +1,5 @@
 using Dapper;
-using DiscordBot.scripts._src;
+using DiscordBot.scripts.src;
 using MySqlConnector;
 
 namespace DiscordBot.scripts.db.DB_SETUP;

@@ -1,11 +1,11 @@
 using Discord;
 using Discord.WebSocket;
-using DiscordBot.scripts._src.party;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Services;
+using DiscordBot.scripts.src.party;
 using Serilog;
 
-namespace DiscordBot.scripts._src.Services;
+namespace DiscordBot.scripts.src.Services;
 
 public class ButtonServices : BaseServices
 {
@@ -181,7 +181,7 @@ public class ButtonServices : BaseServices
 
                 if (partyClass is {isAdmin: true} or {isPartyMember: true} or {isOwner: true} or {isWater:true})
                 {
-                    componentBuilder.WithButton(Constant.PULLING_UP_KEY,$"{Constant.PULLING_UP_KEY}_{partyKey}", ButtonStyle.Success, row:1);
+                    // componentBuilder.WithButton(Constant.PULLING_UP_KEY,$"{Constant.PULLING_UP_KEY}_{partyKey}", ButtonStyle.Success, row:1);
                     componentBuilder.WithButton(Constant.TEAM_KEY,$"{Constant.TEAM_KEY}_{partyKey}", ButtonStyle.Success, row:1);
                 }
 
@@ -267,7 +267,7 @@ public class ButtonServices : BaseServices
                 });
                 await Services.RespondMessageWithExpire(component);
                 
-                var mentions = string.Join(" ", party.Members[..party.MAX_COUNT_MEMBER].Select(m => $"<@{m.USER_ID}>"));
+                var mentions = string.Join(" ", party.Members[..Math.Min(party.MAX_COUNT_MEMBER, party.Members.Count)].Select(m => $"<@{m.USER_ID}>"));
                 isAllMessage = true;
                 message = $"🔔 {partyClass.userRoleString}님이 파티원을 호출하였습니다!\n{mentions}";
                 break;
@@ -408,7 +408,7 @@ public class ButtonServices : BaseServices
                     m.Content = "";
                 });
 
-                await component.DeleteOriginalResponseAsync();
+                // await component.DeleteOriginalResponseAsync();
                 return;
             case Constant.YES_BUTTON_KEY:
                 if (await Services.ExpirePartyAsync(party, component.Channel))

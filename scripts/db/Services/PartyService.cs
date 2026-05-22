@@ -1,10 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using Discord;
-using DiscordBot.scripts._src;
-using DiscordBot.scripts._src.party;
-using DiscordBot.scripts._src.Services;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Repositories;
+using DiscordBot.scripts.src;
+using DiscordBot.scripts.src.party;
 using MySqlConnector;
 using Serilog;
 
