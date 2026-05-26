@@ -21,41 +21,43 @@ public class DbSetup : ISingleton
         await databaseController.ExecuteAsync(async conn =>
         {
             var tableName = dbSetups.ReturnTableName();
-            var sql = "CREATE TABLE IF NOT EXISTS " + tableName;
-        
+            
             Dictionary<string, string> columns = new();
             List<string> addColumns = new();
             
             dbSetups.ReturnColumns(columns);
+
+            // 테이블 생성 SQL (컬럼 정의 포함)
+            var columnDefs = columns.Select(c => $"{c.Key} {c.Value}");
+            var createSql = $"CREATE TABLE IF NOT EXISTS `{tableName}` ({string.Join(", ", columnDefs)})";
         
             for (var i = 0; i < columns.Count; i++)
             {
                 var pair = columns.ElementAt(i);
             
                 string checkColSql = @"
-            SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = @tableName 
-            AND COLUMN_NAME = @name;
+SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+WHERE TABLE_SCHEMA = DATABASE() 
+AND TABLE_NAME = @tableName 
+AND COLUMN_NAME = @name;
 ";
 
                 var affectedRows = await conn.ExecuteAsync(checkColSql, new {tableName, name = pair.Key});
 
                 if (affectedRows == 0)
                 {
-                    var item = $"ALTER TABLE {tableName} ADD COLUMN {pair.Key} {pair.Value}";
+                    var item = $"ALTER TABLE `{tableName}` ADD COLUMN `{pair.Key}` {pair.Value}";
                     if (i >= 1)
                     {
                         var afterKey = columns.ElementAtOrDefault(i - 1);
-                        item += $" after {afterKey.Key}";
+                        item += $" AFTER `{afterKey.Key}`";
                     }
-                    item += ";";
                     addColumns.Add(item);                
                 }
             }
         
             // 테이블 생성
-            await conn.ExecuteAsync(sql);
+            await conn.ExecuteAsync(createSql);
         
             foreach (var addColumn in addColumns)
             {

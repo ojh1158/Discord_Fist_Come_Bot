@@ -34,3 +34,5 @@ test_config.json
 !config.example.json
 !.env.example
 /build_and_send.ps1
+
+publish/*

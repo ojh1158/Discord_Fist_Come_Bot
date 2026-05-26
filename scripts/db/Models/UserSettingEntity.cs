@@ -26,6 +26,8 @@ public class UserSettingEntity : IDbSetup
 
     /// <summary>전체 알림 꺼져 있으면 대기 참가 여부</summary>
     public bool JOIN_PARTY_TO_WAIT_FLAG { get; set; } = true;
+    
+    public bool JOIN_MY_PARTY_WITH_CREATE_FLAG { get; set; } = false;
 
     public string ReturnTableName()
     {
@@ -42,6 +44,7 @@ public class UserSettingEntity : IDbSetup
         columns.Add("PARTY_START_TIME_ALERT_FLAG", "tinyint(1) default 1 not null");
         columns.Add("PARTY_START_TIME_ALERT_MINUTE", "int default 5 not null");
         columns.Add("JOIN_PARTY_TO_WAIT_FLAG", "tinyint(1) default 1 not null");
+        columns.Add("JOIN_MY_PARTY_WITH_CREATE_FLAG", "tinyint(1) default 0 not null");
         columns.Add("UPDATE_DATE", "datetime default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP");
         columns.Add("CREATE_DATE", "datetime default CURRENT_TIMESTAMP null");
     }

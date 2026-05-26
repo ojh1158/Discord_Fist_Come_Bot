@@ -80,13 +80,6 @@ WHERE PARTY_KEY = @partyKey
  AND EXIT_FLAG = FALSE
 ORDER BY SEQ
 ;
-
-SELECT * 
-FROM PARTY_WAIT_MEMBER 
-WHERE PARTY_KEY = @partyKey
- AND EXIT_FLAG = FALSE
-ORDER BY SEQ
-;
 ",
             new { partyKey },
             transaction: transaction
@@ -97,8 +90,7 @@ ORDER BY SEQ
         if (party == null) return null;
 
         party.Members = (await reader.ReadAsync<PartyMemberEntity>()).ToList();
-        party.Members.AddRange((await reader.ReadAsync<PartyMemberEntity>()).ToList());
-
+        
         return party;
     }
 

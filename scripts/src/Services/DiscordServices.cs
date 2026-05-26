@@ -18,7 +18,7 @@ public class DiscordServices : ISingleton
     public readonly UserService userService;
 
     public DiscordServices(DiscordSocketClient discord, PartyService partyService, UserService userService,
-        ConfigClass config)
+        Config config)
     {
         client = discord;
         this.partyService = partyService;
@@ -29,17 +29,17 @@ public class DiscordServices : ISingleton
             client.Log += LogAsync;
             client.Ready += () => ReadyAsync(client);
 
-            var token = App.IsTest
+            var token = config.Test.Enable
                 ? (config?.Discord?.TestToken ?? string.Empty)
                 : config?.Discord?.Token ?? string.Empty;
 
             if (string.IsNullOrEmpty(token))
             {
-                Log.Error($"에러: {(App.IsTest ? "TEST_DISCORD_TOKEN" : "DISCORD_TOKEN")} 환경변수가 설정되지 않았습니다.");
+                Log.Error($"에러: {(config.Test.Enable ? "TEST_DISCORD_TOKEN" : "DISCORD_TOKEN")} 환경변수가 설정되지 않았습니다.");
                 return;
             }
 
-            Log.Information($"[{(App.IsTest ? "테스트" : "프로덕션")} 모드] 봇 시작 중...");
+            Log.Information($"[{(config.Test.Enable ? "테스트" : "프로덕션")} 모드] 봇 시작 중...");
             await client.LoginAsync(TokenType.Bot, token);
             await client.StartAsync();
 

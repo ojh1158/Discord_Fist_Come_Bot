@@ -1,13 +1,13 @@
 using Serilog;
+using DiscordBot;
 
 namespace DiscordBot.scripts.config;
 
 public class LogConfig
 {
-    public static void Init(ConfigClass configClass)
+    public static void Init()
     {
-        var logPath = Path.Combine(AppContext.BaseDirectory,
-            configClass.Logging?.LogPath ?? "logs/", "log-.txt");
+        var logPath = Path.Combine(AppContext.BaseDirectory, "logs/", "log-.txt");
 
         Log.Logger = new LoggerConfiguration().MinimumLevel.Information().WriteTo.Console().WriteTo.File(logPath,
             rollingInterval: RollingInterval.Day,

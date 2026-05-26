@@ -13,22 +13,70 @@ public class DatabaseController : IDisposable, ISingleton
     private static string _connectionString = string.Empty;
     private MySqlConnection? _connection;
 
-    public static void Init(ConfigClass configClass)
+    public static async Task Init(Config config)
     {
-        if (configClass != null)
-        {
-            if (App.IsTest && !string.IsNullOrEmpty(configClass.Database?.TestConnectionString))
-                _connectionString = configClass.Database.TestConnectionString;
-            else if (!string.IsNullOrEmpty(configClass.Database?.ConnectionString))
-                _connectionString = configClass.Database.ConnectionString;
-            else
-                _connectionString = Environment.GetEnvironmentVariable("DATABASE__CONNECTIONSTRING")
-                                    ?? throw new InvalidOperationException(
-                                        "DATABASE__CONNECTIONSTRING 환경변수가 설정되지 않았습니다.");
-        }
+        if (config.Test.Enable && !string.IsNullOrEmpty(config.Database?.TestConnectionString))
+            _connectionString = config.Database.TestConnectionString;
+        else if (!string.IsNullOrEmpty(config.Database?.ConnectionString))
+            _connectionString = config.Database.ConnectionString;
 
         // BINARY(16) <-> Guid 변환 핸들러 등록
         SqlMapper.AddTypeHandler(new GuidBinaryHandler());
+
+       
+        await EnsureDatabaseExistsAsync(_connectionString);
+
+        try
+        {
+            // DB 연결 테스트
+            var testConnection = new MySqlConnection(_connectionString);
+            await testConnection.OpenAsync();
+            await testConnection.CloseAsync();
+        }
+        catch (MySqlException ex) when (ex.Number == -2)
+        {
+            throw new Exception("DB 연결 시간이 초과되었습니다. 서버 상태와 네트워크를 확인하세요.");
+        }
+        catch (MySqlException ex)
+        {
+            throw new Exception($"MySQL 오류({ex.Number}): DB 연결에 실패하였습니다. 서버 주소, 포트, 인증 정보를 확인하세요.");
+        }
+        catch (TimeoutException)
+        {
+            throw new Exception("DB 연결 시간이 초과되었습니다. 서버 상태와 네트워크를 확인하세요.");
+        }
+        catch (Exception)
+        {
+            throw new Exception("알 수 없는 이유로 DB 연결에 실패하였습니다.");
+        }
+    }
+
+    private static async Task EnsureDatabaseExistsAsync(string connectionString)
+    {
+        var builder = new MySqlConnectionStringBuilder(connectionString);
+        var databaseName = builder.Database;
+
+        if (string.IsNullOrEmpty(databaseName))
+        {
+            throw new Exception("데이터베이스 이름을 설정하지 않았습니다.");
+        }
+
+        var masterBuilder = new MySqlConnectionStringBuilder(connectionString)
+        {
+            Database = string.Empty
+        };
+        
+        await using var masterConnection = new MySqlConnection(masterBuilder.ConnectionString);
+        await masterConnection.OpenAsync();
+
+        var checkSql = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = @db";
+        var exists = (long)(await masterConnection.ExecuteScalarAsync(checkSql, new { db = databaseName }) ?? throw new InvalidOperationException());
+
+        if (exists == 0)
+        {
+            await masterConnection.ExecuteAsync($"CREATE DATABASE `{databaseName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            Log.Information($"DB '{databaseName}' 생성 완료");
+        }
     }
 
     /// <summary>
@@ -120,8 +168,8 @@ public class DatabaseController : IDisposable, ISingleton
         }
         catch (Exception ex)
         {
-            Log.Error($"[TX-{txId}] 트랜잭션 작업 중 최종 예외 발생: {ex.Message}\n{ex.StackTrace}");
-            return default;
+            Log.Fatal($"[TX-{txId}] 트랜잭션 작업 중 최종 예외 발생: {ex.Message}\n{ex.StackTrace}");
+            throw;
         }
     }
 
@@ -137,8 +185,8 @@ public class DatabaseController : IDisposable, ISingleton
         }
         catch (Exception ex)
         {
-            Log.Error($"[ExecuteAsync Error] {ex.Message}");
-            return default;
+            Log.Fatal($"[ExecuteAsync Fatal] {ex.Message}");
+            throw;
         }
     }
 
