@@ -49,7 +49,8 @@ public class App
          var discordConfig = new DiscordSocketConfig
           {
              GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent,
-             LogLevel = LogSeverity.Info
+             LogLevel = LogSeverity.Info,
+             MessageCacheSize = 1000,
           };
 
         var assembly = Assembly.GetExecutingAssembly();

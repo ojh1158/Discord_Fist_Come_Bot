@@ -94,7 +94,7 @@ ORDER BY SEQ
         return party;
     }
 
-    public async Task<JoinType> AddUser(string id, ulong userId, string userNickname, MySqlConnection connection, MySqlTransaction transaction)
+    public async Task<ActionType> AddUser(string id, ulong userId, string userNickname, MySqlConnection connection, MySqlTransaction transaction)
     {
         var sql = @"
 INSERT INTO PARTY_MEMBER (PARTY_KEY, USER_ID, USER_NICKNAME)
@@ -105,7 +105,7 @@ VALUES (@id, @userId, @userNickname)
             new { id, userId, userNickname },
             transaction: transaction);
 
-        return affectedRows == 0 ? JoinType.Error : JoinType.Join;
+        return affectedRows == 0 ? ActionType.Error : ActionType.Join;
     }
 
     public async Task<bool> RemoveUser(string id, ulong userId, MySqlConnection connection, MySqlTransaction transaction)

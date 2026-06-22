@@ -6,6 +6,7 @@ using DiscordBot.scripts.src;
 using DiscordBot.scripts.src.party;
 using MySqlConnector;
 using Serilog;
+using ActionType = DiscordBot.scripts.src.party.ActionType;
 
 namespace DiscordBot.scripts.db.Services;
 
@@ -32,22 +33,22 @@ public class PartyService(DatabaseController databaseController, UserRepository 
     /// 파티 참가
     /// 비즈니스 로직: 중복 체크 + 참가
     /// </summary>
-    public Task<(PartyEntity? entity, JoinType type)> JoinPartyAsync(string partyKey, ulong userId, string userNickname)
+    public Task<ActionType> JoinPartyAsync(string partyKey, ulong userId, string userNickname)
     {
         return databaseController.ExecuteInTransactionAsync(async (conn, trans) =>
         {
             var nowParty = await partyRepository.GetPartyEntity(partyKey, conn, trans);
 
-            if (nowParty == null) return (nowParty, JoinType.Error);
+            if (nowParty == null) return ActionType.Error;
             
             if (nowParty.Members.Exists(m => m.USER_ID == userId)
                 || nowParty.WaitMembers.Exists(m => m.USER_ID == userId))
             {
-                return (nowParty, JoinType.Exists);
+                return ActionType.Exists;
             }
 
             var type = await partyRepository.AddUser(partyKey, userId, userNickname, conn, trans);
-            return (await GetPartyEntityAsync(partyKey, conn, trans), type);
+            return type;
         });
     }
     
@@ -55,29 +56,29 @@ public class PartyService(DatabaseController databaseController, UserRepository 
     /// 파티 나가기
     /// 비즈니스 로직: 나가기
     /// </summary>
-    public Task<PartyEntity?> LeavePartyAsync(PartyEntity party, ulong userId)
+    public Task<ActionType> LeavePartyAsync(string partyId, ulong userId)
     {
         return databaseController.ExecuteInTransactionAsync(async (conn, trans) =>
         {
-            var nowParty = await partyRepository.GetPartyEntity(party.PARTY_KEY, conn, trans);
+            var nowParty = await partyRepository.GetPartyEntity(partyId, conn, trans);
             
-            if (nowParty == null) return null;
+            if (nowParty == null) return ActionType.PartyNull;
             
             if (nowParty.Members.Exists(m => m.USER_ID == userId)
                 || nowParty.WaitMembers.Exists(m => m.USER_ID == userId))
             {
-                var removed = await partyRepository.RemoveUser(party.PARTY_KEY, userId, conn, trans);
+                var removed = await partyRepository.RemoveUser(partyId, userId, conn, trans);
                 if (!removed)
                 {
-                    return null;
+                    return ActionType.NoExists;
                 }   
             }
             else
             {
-                return null;
+                return ActionType.NoExists;
             }
 
-            return await GetPartyEntityAsync(party.PARTY_KEY, conn, trans);
+            return ActionType.Leave;
         });
     }
     
@@ -99,21 +100,6 @@ public class PartyService(DatabaseController databaseController, UserRepository 
             entity.MAX_COUNT_MEMBER = newCount;
 
             return true;
-        });
-    }
-    
-    /// <summary>
-    /// 파티 강퇴
-    /// 비즈니스 로직: 강퇴 + 대기열 승격
-    /// </summary>
-    public Task<bool> KickMemberAsync(PartyEntity entity, ulong targetUserId)
-    {
-        return databaseController.ExecuteInTransactionAsync(async (conn, trans) =>
-        {
-            await partyRepository.GetPartyLock(entity.PARTY_KEY, conn, trans);
-            
-            var removed = await partyRepository.RemoveUser(entity.PARTY_KEY, targetUserId, conn, trans);
-            return removed;
         });
     }
     
@@ -164,9 +150,9 @@ public class PartyService(DatabaseController databaseController, UserRepository 
     {
         if (conn == null)
         {
-            return await databaseController.ExecuteAsync(async conn =>
+            return await databaseController.ExecuteAsync(async sqlConnection =>
             {
-                return await partyRepository.GetPartyEntity(partyKey, conn);
+                return await partyRepository.GetPartyEntity(partyKey, sqlConnection);
             });
         }
         else

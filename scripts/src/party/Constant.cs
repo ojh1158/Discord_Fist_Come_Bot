@@ -51,7 +51,7 @@ public class Constant
 
     public const string USER_ALERT_SETTING_OPEN_KEY = "알람 설정 열기";
     
-    public const string USER_ALERT_ALL_FLAG = "모든 알림";
+    public const string USER_ALERT_ALL_FLAG = "알림";
     public const string USER_ALERT_MY_PARTY_FULL_FLAG = "참여한 파티가 인원수를 충족하는 경우 알림";
     public const string USER_ALERT_MY_PARTY_JOIN_USER_FLAG = "내 파티에 유저가 들어올 경우 알림";
     public const string USER_ALERT_MY_PARTY_LEFT_USER_FLAG = "내 파티에 유저가 나갈 경우 알림";

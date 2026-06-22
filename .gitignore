@@ -36,3 +36,7 @@ test_config.json
 /build_and_send.ps1
 
 publish/*
+
+.omo/*
+
+AGENTS.md

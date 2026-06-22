@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using Discord;
 using Discord.WebSocket;
@@ -7,6 +8,7 @@ using DiscordBot.scripts.db.Services;
 using DiscordBot.scripts.src.party;
 using DiscordBot.scripts.src.util;
 using Serilog;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace DiscordBot.scripts.src.Services;
 
@@ -14,16 +16,17 @@ namespace DiscordBot.scripts.src.Services;
 public class DiscordServices : ISingleton
 {
     public readonly DiscordSocketClient client;
-    public readonly PartyService partyService;
-    public readonly UserService userService;
+    private readonly PartyService _partyService;
+    private readonly UserService _userService;
+    private readonly TaskDelayQueue _taskDelayQueue = new();
 
-    public DiscordServices(DiscordSocketClient discord, PartyService partyService, UserService userService,
-        Config config)
+    public DiscordServices(DiscordSocketClient discord, PartyService partyService, UserService userService, TaskDelayQueue taskDelayQueue, Config config)
     {
         client = discord;
-        this.partyService = partyService;
-        this.userService = userService;
-
+        _partyService = partyService;
+        _userService = userService;
+        _taskDelayQueue = taskDelayQueue;
+        
         _ = Task.Run(async () =>
         {
             client.Log += LogAsync;
@@ -110,46 +113,78 @@ public class DiscordServices : ISingleton
         Log.Information($"{client.CurrentUser.Username} 봇이 준비되었습니다!");
     }
 
-    public async Task UpdateMessage(SocketInteraction component, PartyEntity party, bool isAllMessage, string message)
+    public async Task UpdateMessage(SocketInteraction component, PartyEntity? party, bool isAllMessage = false, string message = "")
     {
-        // 임베드 메시지 업데이트
-        var updatedEmbed = await UpdatedEmbed(party);
-        var updatedComponent = UpdatedComponent(party);
-
-        var originalMessage = await component.Channel.GetMessageAsync(party.MESSAGE_KEY) as IUserMessage;
-        if (originalMessage == null)
+        if (party is not null)
         {
-            if (await client.GetChannelAsync(party.CHANNEL_KEY) is IMessageChannel cl)
+            var delayInfo = await _taskDelayQueue.EnqueueAndWaitAsync(party.PARTY_KEY);
+
+            if (delayInfo == null)
             {
-                originalMessage = await cl.GetMessageAsync(party.MESSAGE_KEY) as IUserMessage;
+                Log.Error("딜레이 정보가 왜 없냐...");
+                return;
             }
-        }
 
-        // 원본 메시지 수정
-        if (originalMessage != null)
-        {
+            var embeds = new Embed[delayInfo.WaitingCount > 0 ? 2 : 1];
+            var updatedEmbed = await UpdatedEmbed(party);
+            var updatedComponent = UpdatedComponent(party);
+            embeds[0] = updatedEmbed;
 
-            await originalMessage.ModifyAsync(msg =>
+            if (delayInfo.WaitingCount > 0)
             {
-                msg.Content = null;
-                msg.Embed = updatedEmbed;
-                msg.Components = updatedComponent;
-            });
+                var embedBuilder = new EmbedBuilder();
+                embedBuilder.WithColor(Color.Red);
 
-            if (isAllMessage)
-            {
-                if (!component.HasResponded)
+                var waitingMessage =
+                    $"앞에 {delayInfo.WaitingCount}개의 요청을 처리중입니다... {PartyQueueServices.EmojiProcessing}";
+                if (delayInfo.DelaySeconds > 3 && delayInfo.WaitingCount != 0)
                 {
-                    await component.DeferAsync();
+                    waitingMessage += "\n요청이 자주 많아 슬로우 모드 중입니다...";
+                    waitingMessage += "\n**UI 업데이트만 느려집니다**";
                 }
 
-                await originalMessage.ReplyAsync(message);
+                
+                embedBuilder.WithDescription(waitingMessage);
+                embeds[1] = embedBuilder.Build();
             }
-        }
-        else
-        {
-            await component.Channel.SendMessageAsync($"{party.DISPLAY_NAME} 파티에 대한 원본 메세지를 찾을 수 없습니다. 파티를 해산합니다.");
-            await partyService.ExpirePartyAsync(party.MESSAGE_KEY);
+            
+            var options = new RequestOptions
+            {
+                Timeout = 60000, // 줄 서는 시간을 고려해 디스코드 내부 타임아웃을 60초로 넉넉하게 확장
+                RetryMode = RetryMode.AlwaysRetry
+            };
+
+
+            var cacheKey = party.MESSAGE_KEY + "_MessageKey";
+            
+            if (!CacheManager.Cache.TryGetValue(cacheKey, out IUserMessage? originalMessage))
+            {
+                Log.Information("메세지 캐시 생성");
+                originalMessage = await component.Channel.GetMessageAsync(party.MESSAGE_KEY, options: options) as IUserMessage;
+                CacheManager.Cache.Set(cacheKey, originalMessage, CacheManager.GetOptions());
+            }
+            
+            if (originalMessage != null)
+            {
+                // 원본 메시지 수정
+                await originalMessage.ModifyAsync(msg =>
+                {
+                    msg.Content = null;
+                    msg.Embeds = embeds;
+                    msg.Components = updatedComponent;
+                }, options);
+
+                // 앞에서 이미 DeferAsync를 했으므로 여기 있던 Defer 조건문은 삭제합니다.
+                if (isAllMessage)
+                {
+                    await originalMessage.ReplyAsync(message, options: options);
+                }
+            }
+            else
+            {
+                await component.Channel.SendMessageAsync($"{party.DISPLAY_NAME} 파티에 대한 원본 메세지를 찾을 수 없습니다. 파티를 해산합니다.", options: options);
+                await _partyService.ExpirePartyAsync(party.MESSAGE_KEY);
+            }
         }
     }
 
@@ -290,7 +325,7 @@ public class DiscordServices : ISingleton
 
         return true;
     }
-
+    
     public async Task<Embed> UpdatedEmbed(PartyEntity party)
     {
         var members = party.Members.Count <= party.MAX_COUNT_MEMBER ? party.Members : party.Members[..party.MAX_COUNT_MEMBER];
@@ -358,16 +393,26 @@ public class DiscordServices : ISingleton
         if (party.MAX_COUNT_MEMBER == members.Count) color = Color.Green;
         if (party.IS_CLOSED) color = Color.Orange;
         if (party.IS_EXPIRED) color = Color.Red;
+        
+        var cacheKey = party.OWNER_KEY + "_AvatarUrl";
+        
+        if (!CacheManager.Cache.TryGetValue(cacheKey, out string? result))
+        {
+            var ownerUser = await client.Rest.GetGuildAsync(party.GUILD_KEY);
+            var user = await ownerUser.GetUserAsync(party.OWNER_KEY);
+            string? ownerAvatarUrl = user?.GetDisplayAvatarUrl();
+            var cacheOptions = new MemoryCacheEntryOptions()
+                .SetAbsoluteExpiration(TimeSpan.FromDays(1));
+            CacheManager.Cache.Set(cacheKey, ownerAvatarUrl, cacheOptions);
+            Log.Information("캐쉬 생성");
+            result = ownerAvatarUrl;
+        }
 
-        var ownerUser = await client.Rest.GetGuildAsync(party.GUILD_KEY);
-        var user = await ownerUser.GetUserAsync(party.OWNER_KEY);
-        // ownerUser ??= (await client.GetUserAsync(party.OWNER_KEY)) as SocketGuildUser;
-        string? ownerAvatarUrl = user?.GetDisplayAvatarUrl();
 
         var updatedEmbed = new EmbedBuilder();
         updatedEmbed
             .WithTitle(title)
-            .WithAuthor(party.OWNER_NICKNAME ?? "알 수 없음", ownerAvatarUrl) // 여기에 추가!
+            .WithAuthor(party.OWNER_NICKNAME ?? "알 수 없음", result) // 여기에 추가!
             .WithDescription(description)
             .WithColor(color)
             .WithFooter($"버그제보(Discord): ojh1158 Version: {Constant.VERSION}")
@@ -437,13 +482,13 @@ public class DiscordServices : ISingleton
         catch (Exception)
         {
             Log.Error("더 이상 접근할 수 없는 메세지입니다.");
-            await partyService.ExpirePartyAsync(party.MESSAGE_KEY);
+            await _partyService.ExpirePartyAsync(party.MESSAGE_KEY);
             return true;
         }
 
         if (channel == null) return false;
 
-        var result = await partyService.ExpirePartyAsync(party.MESSAGE_KEY);
+        var result = await _partyService.ExpirePartyAsync(party.MESSAGE_KEY);
 
         if (!result) return false;
 
@@ -503,7 +548,7 @@ public class DiscordServices : ISingleton
                     {
                         _ = Task.Run(async () =>
                         {
-                            var ownerSetting = await userService.GetUserSettingAsync(partyEntity.OWNER_KEY);
+                            var ownerSetting = await _userService.GetUserSettingAsync(partyEntity.OWNER_KEY);
 
                             IUser? owner = null;
                             
@@ -529,7 +574,7 @@ public class DiscordServices : ISingleton
                             {
                                 _ = Task.Run(async () =>
                                 {
-                                    var ownerSetting = await userService.GetUserSettingAsync(partyEntityMember.USER_ID);
+                                    var ownerSetting = await _userService.GetUserSettingAsync(partyEntityMember.USER_ID);
                             
                                     if (ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_FULL_ALERT_FLAG: true })
                                     {
@@ -547,7 +592,7 @@ public class DiscordServices : ISingleton
                     {
                         _ = Task.Run(async () =>
                         {
-                            var ownerSetting = await userService.GetUserSettingAsync(partyEntity.OWNER_KEY);
+                            var ownerSetting = await _userService.GetUserSettingAsync(partyEntity.OWNER_KEY);
                             
                             if (ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_JOIN_USER_ALERT_FLAG: true })
                             {
@@ -561,7 +606,7 @@ public class DiscordServices : ISingleton
                     }
                     break;
                 case Constant.JOIN_AUTO_KEY:
-                    var target = await partyService.GetPartyEntityAsync(partyEntity.PARTY_KEY);
+                    var target = await _partyService.GetPartyEntityAsync(partyEntity.PARTY_KEY);
                     if (target != null)
                     {
                         foreach (var partyMemberEntity in target.MemberOnly)
@@ -570,7 +615,7 @@ public class DiscordServices : ISingleton
                             
                             _ = Task.Run(async () =>
                             {
-                                var userSetting = await userService.GetUserSettingAsync(partyMemberEntity.USER_ID);
+                                var userSetting = await _userService.GetUserSettingAsync(partyMemberEntity.USER_ID);
                             
                                 if (userSetting is { ALL_ALERT_FLAG: true, JOIN_PARTY_TO_WAIT_FLAG: true })
                                 {
@@ -585,7 +630,7 @@ public class DiscordServices : ISingleton
                 case Constant.USER_ALERT_JOIN_PARTY_TO_WAIT_FLAG:
                     _ = Task.Run(async () =>
                     {
-                        var userSetting = await userService.GetUserSettingAsync(user.Id);
+                        var userSetting = await _userService.GetUserSettingAsync(user.Id);
                             
                         if (userSetting is { ALL_ALERT_FLAG: true, JOIN_PARTY_TO_WAIT_FLAG: true })
                         {

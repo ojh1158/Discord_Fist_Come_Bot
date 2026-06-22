@@ -4,6 +4,7 @@ using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Services;
 using DiscordBot.scripts.src.party;
 using Serilog;
+using ActionType = DiscordBot.scripts.src.party.ActionType;
 
 namespace DiscordBot.scripts.src.Services;
 
@@ -12,13 +13,15 @@ public class ButtonServices : BaseServices
     private readonly UserService userService;
     private readonly PartyService partyService;
     private readonly GuildService guildService;
+    private readonly PartyQueueServices partyQueueServices;
     
-    public ButtonServices(DiscordServices services, UserService userService, PartyService partyService, GuildService guildService) : base(services)
+    public ButtonServices(DiscordServices services, UserService userService, PartyQueueServices partyQueueServices, PartyService partyService, GuildService guildService) : base(services)
     {
         Services.client.ButtonExecuted += HandleButtonAsync;
         this.userService = userService;
         this.partyService = partyService;
         this.guildService = guildService;
+        this.partyQueueServices = partyQueueServices;
     }
     
     private async Task HandleButtonAsync(SocketMessageComponent component)
@@ -105,75 +108,42 @@ public class ButtonServices : BaseServices
             return;
         }
 
-        var type = JoinType.Error;
+        ActionType type;
         
         switch (action)
         {
             case Constant.JOIN_KEY:
-                (party, type) = await partyService.JoinPartyAsync(party.PARTY_KEY, partyClass.guildUser.Id, partyClass.userNickname);
-                    
-                // Service에서 중복 체크 포함하여 처리
-                if (type is JoinType.Join or JoinType.Wait && party != null)
-                {
-                    if (type is JoinType.Wait)
-                    {
-                        message = "파티 인원이 가득 찼습니다. 대기 인원으로 등록되었습니다.";
-                    }
-                    else
-                    {
-                        message = $"✅ {party.DISPLAY_NAME} 파티에 참가했습니다!";
-                    }
-
-                    isAddSettingButton = true;
-                    
-                    Services.SendUserAlert(party, component.User, action);
-                    
-                    party = await partyService.GetPartyEntityAsync(party.PARTY_KEY);
-                }
-                else if(type is JoinType.Exists or JoinType.Error || party == null)
-                {
-                    await component.ModifyOriginalResponseAsync(m => m.Content = type is JoinType.Exists ? "파티에 이미 참가하였습니다." : "알 수 없는 오류가 나타났습니다.");
-                    _ = Services.RespondMessageWithExpire(component);
-                    return;
-                }
-                
-                break;
+                var result = await partyQueueServices.Queue(party.PARTY_KEY, partyClass.userId, partyClass.userNickname, ActionType.Join, component);
+                if (result?.AfterEntity is null || result.ResultType is not ActionType.Join) return;
+                Services.SendUserAlert(result.AfterEntity, component.User, action);
+                return;
                 
             case Constant.LEAVE_KEY:
-                var afterParty = await partyService.LeavePartyAsync(party, partyClass.userId);
-                if (afterParty != null)
+                result = await partyQueueServices.Queue(party.PARTY_KEY, partyClass.userId, partyClass.userNickname, ActionType.Leave, component);
+                try
                 {
-                    message = $"❌ {party.DISPLAY_NAME} 파티에서 나갔습니다.";
-                    
-                    Services.SendUserAlert(partyEntity!, component.User, action);
+                    if (result?.AfterEntity is null || result.ResultType is not ActionType.Leave) return;
+                        
+                    Services.SendUserAlert(result.AfterEntity, component.User, action);
+
                     if (party.Members.Count > party.MAX_COUNT_MEMBER)
                     {
                         var userEntity = party.Members[party.MAX_COUNT_MEMBER];
-                        
-                        if (afterParty.MemberOnly.Find(d => d.USER_ID == userEntity.USER_ID) != null)
+                            
+                        if (result.AfterEntity.MemberOnly.Find(d => d.USER_ID == userEntity.USER_ID) != null)
                         {
                             var user = await Services.client.Rest.GetUserAsync(userEntity.USER_ID);
-                            
-                            Services.SendUserAlert(afterParty, user, Constant.USER_ALERT_JOIN_PARTY_TO_WAIT_FLAG);
+                                
+                            Services.SendUserAlert(result.AfterEntity, user, Constant.USER_ALERT_JOIN_PARTY_TO_WAIT_FLAG);
                         }
                     }
-                    
-                    party = afterParty;
                 }
-                else
+                catch (Exception exception)
                 {
-                    await component.ModifyOriginalResponseAsync(m => m.Content = "파티에 참가하지 않았거나 나가기에 실패했습니다.");
-                    return;
+                    Log.Error(exception, exception.Message);
                 }
-                break;
+                return;
             case Constant.OPTION_KEY:
-                // if (partyClass.isNone)
-                // {
-                //     await component.ModifyOriginalResponseAsync(m => m.Content ="권한이 없어 표시할 기능이 없습니다.");
-                //     await Services.RespondMessageWithExpire(component, time: 5);
-                //     return;
-                // }
-                
                 // 옵션 버튼들 만들기
                 var componentBuilder = new ComponentBuilder();
                 
@@ -273,7 +243,7 @@ public class ButtonServices : BaseServices
                 break;
             case Constant.EXPIRE_KEY:
                 
-                if (!partyClass.isOwner && !partyClass.isAdmin)
+                if (partyClass is { isOwner: false, isAdmin: false })
                 {
                     await component.ModifyOriginalResponseAsync(msg =>
                     {
@@ -661,7 +631,7 @@ public class ButtonServices : BaseServices
             .WithDescription("아래 버튼을 누르면 해당 알림이 **켜지거나 꺼집니다.**\n초록색 = 켜짐, 빨간색 = 꺼짐")
             .WithColor(entity.ALL_ALERT_FLAG ? Color.Green : Color.Blue)
             .WithFooter("버튼을 누르면 즉시 반영됩니다.")
-            .AddField("모든 알림", entity.ALL_ALERT_FLAG ? "✅ 켜짐" : "❌ 꺼짐", true)
+            .AddField(Constant.USER_ALERT_ALL_FLAG, entity.ALL_ALERT_FLAG ? "✅ 켜짐" : "❌ 꺼짐", true)
             .AddField(Constant.PARTY_START_TIME_ALERT_FLAG, entity.PARTY_START_TIME_ALERT_FLAG ? "✅ 켜짐" : "❌ 꺼짐", true)
             .AddField(Constant.USER_ALERT_MY_PARTY_FULL_FLAG, entity.MY_PARTY_FULL_ALERT_FLAG ? "✅ 켜짐" : "❌ 꺼짐", true)
             .AddField(Constant.USER_ALERT_JOIN_PARTY_TO_WAIT_FLAG, entity.JOIN_PARTY_TO_WAIT_FLAG ? "✅ 켜짐" : "❌ 꺼짐", true)

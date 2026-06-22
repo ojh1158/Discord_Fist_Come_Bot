@@ -133,23 +133,23 @@ public class DatabaseController : IDisposable, ISingleton
 
         try
         {
-            Log.Debug($"[TX-{txId}] 연결 시도 중...");
+            // Log.Debug($"[TX-{txId}] 연결 시도 중...");
             await using var connection = await GetConnectionAsync();
 
-            Log.Debug($"[TX-{txId}] 트랜잭션 시작 중...");
+            // Log.Debug($"[TX-{txId}] 트랜잭션 시작 중...");
             await using var transaction = await connection.BeginTransactionAsync();
 
             try
             {
-                Log.Information($"[TX-{txId}] 로직 실행 시작 (T: {typeof(T).Name})");
+                // Log.Information($"[TX-{txId}] 로직 실행 시작 (T: {typeof(T).Name})");
 
                 var result = await action.Invoke(connection, transaction);
 
-                Log.Debug($"[TX-{txId}] 커밋 시도 중...");
+                // Log.Debug($"[TX-{txId}] 커밋 시도 중...");
                 await transaction.CommitAsync();
 
                 var duration = DateTime.Now - startTime;
-                Log.Information($"[TX-{txId}] 성공 및 커밋 완료 ({duration.TotalMilliseconds}ms)");
+                // Log.Information($"[TX-{txId}] 성공 및 커밋 완료 ({duration.TotalMilliseconds}ms)");
                 return result;
             }
             catch (Exception ex)

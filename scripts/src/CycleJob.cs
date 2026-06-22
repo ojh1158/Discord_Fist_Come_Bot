@@ -23,13 +23,13 @@ public class CycleJob(PartyService partyService, DiscordServices discordServices
             try
             {
                 var executeTime = DateTime.UtcNow;
-                Log.Information($"[Cycle] 만료 파티 체크 시작 (시간: {executeTime:HH:mm:ss} UTC)");
+                // Log.Information($"[Cycle] 만료 파티 체크 시작 (시간: {executeTime:HH:mm:ss} UTC)");
             
                 var partyList = await partyService.CycleExpiredPartyListAsync();
             
                 if (partyList is { Count: > 0 })
                 {
-                    Log.Information($"[Cycle] {partyList.Count}개의 만료 파티 발견");
+                    // Log.Information($"[Cycle] {partyList.Count}개의 만료 파티 발견");
                     foreach (var partyEntity in partyList)
                     {
                         await discordServices.ExpirePartyAsync(partyEntity);
@@ -37,7 +37,7 @@ public class CycleJob(PartyService partyService, DiscordServices discordServices
                 }
                 else
                 {
-                    Log.Information("[Cycle] 만료된 파티가 없습니다.");
+                    // Log.Information("[Cycle] 만료된 파티가 없습니다.");
                 }
             }
             catch (Exception e)
