@@ -8,25 +8,35 @@ namespace DiscordBot.scripts.src.util;
 
 public class TaskDelayQueue : ISingleton
 {
-    // 🔥 기본 상수를 최소/최대 범위로 정의합니다.
-    private const float MinDelaySeconds = 1f;
-    private const float MaxDelaySeconds = 5f;
-    private const float DelayStepSeconds = 1f; // 연타 시 늘어날 가중치 (원하는 대로 조절 가능)
-    private const double SpamWindowSeconds = 7.0f; // 연타 기준 시간 (30초)
+    public const float MinDelaySeconds = 1f;
+    public const float MaxDelaySeconds = 5f;
+    public const float DelayStepSeconds = 1f; 
+    public const double SpamWindowSeconds = 7.0f; 
     
     private readonly MemoryCacheEntryOptions _options = new MemoryCacheEntryOptions().SetAbsoluteExpiration(TimeSpan.FromHours(1));
 
-    private string GetKey(string partyId) => $"{partyId}_DelayQueue";
+    private string GetKey(string partyId, bool keepOnlyLast) => $"{partyId}_DelayQueue_{(keepOnlyLast? "keep" : "noKeep")}";
+    private static readonly SemaphoreSlim _lock = new(1, 1);
 
-    public async Task<DelayInfo?> EnqueueAndWaitAsync(string partyId)
+    public async Task<DelayInfo?> EnqueueAndWaitAsync(string partyId, bool keepOnlyLast)
     {
-        var key = GetKey(partyId);
+        var key = GetKey(partyId, keepOnlyLast);
+
+        PartyQueueState? state;
         
-        if (!CacheManager.Cache.TryGetValue(key, out PartyQueueState? state))
+        await _lock.WaitAsync();
+        try
         {
-            var partyQueueState = new PartyQueueState();
-            CacheManager.Cache.Set(key, partyQueueState, _options);
-            state = partyQueueState;
+            if (!CacheManager.Cache.TryGetValue(key, out state))
+            {
+                var partyQueueState = new PartyQueueState();
+                CacheManager.Cache.Set(key, partyQueueState, _options);
+                state = partyQueueState;
+            }
+        }
+        finally
+        {
+            _lock.Release();
         }
         
         if (state == null)
@@ -35,95 +45,166 @@ public class TaskDelayQueue : ISingleton
             return null;
         }
         
-        // 1. 해당 파티방의 대기 카운트 증가
         Interlocked.Increment(ref state.WaitingCount);
 
-        // 2. 해당 파티방 전용 세마포어 진입
-        await state.Semaphore.WaitAsync();
+        var myTcs = new TaskCompletionSource<DelayInfo?>();
+        TaskCompletionSource<DelayInfo?>? previousTcs = null;
+        CancellationTokenSource? previousCts = null;
 
-        try
+        var myCts = new CancellationTokenSource();
+
+        lock (state.LockObject)
         {
-            var now = DateTime.UtcNow;
-
-            if (!state.IsFirstRequest)
+            if (keepOnlyLast)
             {
-                // 💡 [핵심] 마지막 요청으로부터 30초 이내에 또 요청이 왔는지 확인
-                if ((now - state.LastProcessedTime).TotalSeconds <= SpamWindowSeconds)
+                previousTcs = state.LastActiveTcs;
+                previousCts = state.LastActiveCts;
+                
+                // 내가 가장 최신 요청(대기자)이 됨
+                state.LastActiveTcs = myTcs;
+                state.LastActiveCts = myCts;
+            }
+        }
+
+        _ = Task.Run(async () =>
+        {
+            // 💡 [수정] 새 요청이 들어왔으므로 "직전 요청"의 타이머를 터뜨리고 탈락(false)시킵니다.
+            if (keepOnlyLast && previousTcs != null && !previousTcs.Task.IsCompleted)
+            {
+                previousCts?.Cancel();       // 직전 녀석의 Task.Delay 취소
+                previousTcs.TrySetResult(null); // 직전 녀석 탈락 처리
+            }
+
+            // 내 순서가 올 때까지 대기
+            await state.Semaphore.WaitAsync();
+            
+            Interlocked.Decrement(ref state.WaitingCount);
+
+            try
+            {
+                // 💡 만약 세마포어 기다리는 도중에 내 뒤에 또 연타가 와서 내가 취소되었다면 바로 퇴장
+                if (keepOnlyLast && myCts.Token.IsCancellationRequested)
                 {
-                    // 30초 이내 연타라면 딜레이 단계를 증가시킴 (최대 10초 제한)
-                    state.CurrentDelaySeconds = Math.Min(MaxDelaySeconds, state.CurrentDelaySeconds + DelayStepSeconds);
-                    Log.Information("[{PartyId}] 연타 감지! 딜레이가 {Delay}초로 증가합니다.", partyId, state.CurrentDelaySeconds);
+                    myTcs.TrySetResult(null);
+                    return;
+                }
+
+                var now = DateTime.UtcNow;
+
+                if (!state.IsFirstRequest)
+                {
+                    if ((now - state.LastProcessedTime).TotalSeconds <= SpamWindowSeconds)
+                    {
+                        state.CurrentDelaySeconds = Math.Min(MaxDelaySeconds, state.CurrentDelaySeconds + DelayStepSeconds);
+                        // Log.Information("[{PartyId}] 연타 감지! 딜레이가 {Delay}초로 증가합니다.", partyId, state.CurrentDelaySeconds);
+                    }
+                    else
+                    {
+                        state.CurrentDelaySeconds = MinDelaySeconds;
+                    }
+
+                    var currentDelay = state.CurrentDelaySeconds;
+                    var timeSinceLastRequest = now - state.LastProcessedTime;
+                    
+                    if (timeSinceLastRequest < TimeSpan.FromSeconds(currentDelay))
+                    {
+                        var delayTime = TimeSpan.FromSeconds(currentDelay) - timeSinceLastRequest;
+                        
+                        // 내 뒤에 연타가 오면 myCts.Token에 의해 대기가 취소됩니다.
+                        await Task.Delay(delayTime, myCts.Token);
+                    }
                 }
                 else
                 {
-                    // 30초가 지났다면 딜레이를 다시 최소치(1.5초)로 초기화
+                    state.IsFirstRequest = false;
                     state.CurrentDelaySeconds = MinDelaySeconds;
                 }
 
-                var currentDelay = state.CurrentDelaySeconds;
-
-                // 실제 대기해야 하는 시간 계산
-                var timeSinceLastRequest = now - state.LastProcessedTime;
-                if (timeSinceLastRequest < TimeSpan.FromSeconds(currentDelay))
+                state.LastProcessedTime = DateTime.UtcNow;
+                
+                // 💡 대기를 무사히 버텼다면, 내가 "진짜 최종 생존자"인지 검사합니다.
+                lock (state.LockObject)
                 {
-                    var delayTime = TimeSpan.FromSeconds(currentDelay) - timeSinceLastRequest;
-                    await Task.Delay(delayTime);
+                    var currentQueueCount = Math.Max(0, state.WaitingCount - 1);
+                    // 아직도 내가 마지막 보루로 등록되어 있다면 찐 최종 성공(true)
+                    var result = new DelayInfo
+                    {
+                        WaitingCount = currentQueueCount,
+                        DelaySeconds = state.CurrentDelaySeconds,
+                        WaitTcs = myTcs,
+                        IsLastRequest = true
+                    };
+                    
+                    switch (keepOnlyLast)
+                    {
+                        case true when state.LastActiveTcs == myTcs:
+                        case false:
+                            myTcs.TrySetResult(result);
+                            break;
+                        default:
+                            myTcs.TrySetResult(null); // 그새 뒤에 누가 왔다면 탈락
+                            break;
+                    }
                 }
             }
-            else
+            catch (TaskCanceledException)
             {
-                state.IsFirstRequest = false;
-                state.CurrentDelaySeconds = MinDelaySeconds; // 첫 요청은 기본 1.5초 세팅
+                myTcs.TrySetResult(null);
             }
+            finally
+            {
+                state.Semaphore.Release();
+            }
+        });
+        
+        var currentQueueCount = Math.Max(0, state.WaitingCount - 1);
 
-            // 3. 딜레이가 끝난 '지금 통과 시점'을 마지막 처리 시간으로 기록
-            state.LastProcessedTime = DateTime.UtcNow;
+        return new DelayInfo
+        {
+            WaitingCount = currentQueueCount,
+            DelaySeconds = state.CurrentDelaySeconds,
+            WaitTcs = myTcs,
+            IsLastRequest = false
+        };
+    }
 
-            // 4. 현재 내 뒤에 줄 서 있는 사람 수 계산
-            var currentQueueCount = Math.Max(0, state.WaitingCount - 1);
+    public DelayInfo? GetDelayInfo(string partyId, bool keepOnlyLast)
+    {
+        if (CacheManager.Cache.TryGetValue(GetKey(partyId, keepOnlyLast), out PartyQueueState? state))
+        {
+            var actualWaitingCount = Math.Max(0, state!.WaitingCount - 1);
             
             return new DelayInfo
             {
-                WaitingCount = currentQueueCount,
                 DelaySeconds = state.CurrentDelaySeconds,
-            };
-        }
-        finally
-        {
-            // 5. 다음 사람을 위해 세마포어 해제
-            Interlocked.Decrement(ref state.WaitingCount);
-            state.Semaphore.Release();
-        }
-    }
-
-    public DelayInfo? GetDelayInfo(string partyId)
-    {
-        if (CacheManager.Cache.TryGetValue(GetKey(partyId), out PartyQueueState? state))
-        {
-            return new DelayInfo
-            {
-                DelaySeconds = state!.CurrentDelaySeconds,
-                WaitingCount = state.WaitingCount,
+                WaitingCount = actualWaitingCount,
+                WaitTcs = state.LastActiveTcs,
+                IsLastRequest = false,
             };
         }
         return null;
-    }
-    
+    } 
+
     public class DelayInfo
     {
         public required int WaitingCount { get; init; }
         public required float DelaySeconds { get; init; }
+        public required TaskCompletionSource<DelayInfo?>? WaitTcs { get; init; }
+        
+        public required bool IsLastRequest { get; init; }
     }
 
-    // 파티별 상태를 담는 내부 클래스
     public class PartyQueueState
     {
         public readonly SemaphoreSlim Semaphore = new(1, 1);
+        public readonly object LockObject = new(); 
         public int WaitingCount = 0;                        
         public DateTime LastProcessedTime = DateTime.MinValue;
         public bool IsFirstRequest = true;
+        public float CurrentDelaySeconds = MinDelaySeconds;
         
-        // 💡 파티별로 누적되는 현재 딜레이 시간을 저장하는 변수 추가
-        public float CurrentDelaySeconds { get; set; } = MinDelaySeconds;
+        public TaskCompletionSource<DelayInfo?>? LastActiveTcs { get; set; }
+        // 💡 각 요청의 딜레이(Task.Delay)를 원격 조율하기 위해 CTS도 상태창에 함께 저장합니다.
+        public CancellationTokenSource? LastActiveCts { get; set; } 
     }
 }

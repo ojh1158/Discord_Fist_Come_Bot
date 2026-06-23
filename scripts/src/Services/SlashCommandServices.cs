@@ -1,3 +1,4 @@
+using Discord;
 using Discord.Rest;
 using Discord.WebSocket;
 using DiscordBot.scripts.db.Models;

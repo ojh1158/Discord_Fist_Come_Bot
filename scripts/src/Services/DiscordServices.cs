@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using Discord;
+using Discord.Rest;
 using Discord.WebSocket;
 using DiscordBot.scripts.config;
 using DiscordBot.scripts.db.Models;
@@ -33,8 +34,8 @@ public class DiscordServices : ISingleton
             client.Ready += () => ReadyAsync(client);
 
             var token = config.Test.Enable
-                ? (config?.Discord?.TestToken ?? string.Empty)
-                : config?.Discord?.Token ?? string.Empty;
+                ? config.Discord.TestToken
+                : config.Discord.Token;
 
             if (string.IsNullOrEmpty(token))
             {
@@ -45,12 +46,6 @@ public class DiscordServices : ISingleton
             Log.Information($"[{(config.Test.Enable ? "테스트" : "프로덕션")} 모드] 봇 시작 중...");
             await client.LoginAsync(TokenType.Bot, token);
             await client.StartAsync();
-
-            // client.SlashCommandExecuted += HandleSlashCommandAsync;
-            // client.ButtonExecuted += HandleButtonAsync;
-            // client.ModalSubmitted += HandleModalAsync;
-            // client.SelectMenuExecuted += HandleSelectMenuAsync;
-            // client.Ready += InitCommands;
         });
     }
 
@@ -113,15 +108,31 @@ public class DiscordServices : ISingleton
         Log.Information($"{client.CurrentUser.Username} 봇이 준비되었습니다!");
     }
 
-    public async Task UpdateMessage(SocketInteraction component, PartyEntity? party, bool isAllMessage = false, string message = "")
+    public async Task UpdateMessage(SocketInteraction component, PartyEntity? party, bool isAllMessage = false, string message = "", TaskDelayQueue.DelayInfo? delayInfo = null)
     {
         if (party is not null)
-        {
-            var delayInfo = await _taskDelayQueue.EnqueueAndWaitAsync(party.PARTY_KEY);
+        { 
+            var isKeepOnlyLast = delayInfo is not null;
+            
+            delayInfo ??= await _taskDelayQueue.EnqueueAndWaitAsync(party.MESSAGE_KEY.ToString(), false);
 
-            if (delayInfo == null)
+            if (delayInfo is null or {WaitTcs: null})
             {
                 Log.Error("딜레이 정보가 왜 없냐...");
+                return;
+            }
+
+            delayInfo = await delayInfo.WaitTcs.Task;
+            
+            if (delayInfo is null or {WaitTcs: null})
+            {
+                Log.Error("딜레이 정보가 왜 없냐...");
+                return;
+            }
+
+            if (isKeepOnlyLast && !delayInfo.IsLastRequest)
+            {
+                Log.Information("--마지막 요소가 아님--");
                 return;
             }
 
@@ -159,7 +170,7 @@ public class DiscordServices : ISingleton
             
             if (!CacheManager.Cache.TryGetValue(cacheKey, out IUserMessage? originalMessage))
             {
-                Log.Information("메세지 캐시 생성");
+                Log.Information($"[{cacheKey}] 메세지 캐시 생성");
                 originalMessage = await component.Channel.GetMessageAsync(party.MESSAGE_KEY, options: options) as IUserMessage;
                 CacheManager.Cache.Set(cacheKey, originalMessage, CacheManager.GetOptions());
             }
@@ -195,8 +206,18 @@ public class DiscordServices : ISingleton
         var separator = "\u200B"; // Zero-Width Space
         var exMessage = $"{separator} (해당 메세지는 {DateTime.Now.AddSeconds(time).ToDiscordRelativeTimestamp()} 삭제됩니다.)";
 
-        message.ModifyAsync(mp => mp.Content = $"{content}{exMessage}");
-
+        RestInteractionMessage? restInteractionMessage = null;
+        if (message is RestInteractionMessage interactionMessage)
+        {
+            restInteractionMessage = interactionMessage;
+            
+            restInteractionMessage.ModifyAsync(mp => mp.Content = $"{content}{exMessage}");
+        }
+        else
+        {
+            message.ModifyAsync(mp => mp.Content = $"{content}{exMessage}");
+        }
+        
         // 백그라운드에서 삭제
         _ = Task.Run(async () =>
         {
@@ -216,17 +237,25 @@ public class DiscordServices : ISingleton
                 {
                     return;
                 }
-
-                await latestMessage.DeleteAsync();
+                
+                if (restInteractionMessage is not null)
+                {
+                    await restInteractionMessage.DeleteAsync();
+                }
+                else
+                {
+                    await latestMessage.DeleteAsync();
+                }
+                
                 action?.Invoke();
             }
             catch (Discord.Net.HttpException ex) when (ex.HttpCode == HttpStatusCode.NotFound)
             {
-
+                
             }
             catch (Exception ex)
             {
-                _ = LogAsync(new LogMessage(LogSeverity.Error, "MessageWithExpire", ex.Message));
+                Log.Error(ex, ex.Message);
             }
         });
     }
@@ -404,7 +433,7 @@ public class DiscordServices : ISingleton
             var cacheOptions = new MemoryCacheEntryOptions()
                 .SetAbsoluteExpiration(TimeSpan.FromDays(1));
             CacheManager.Cache.Set(cacheKey, ownerAvatarUrl, cacheOptions);
-            Log.Information("캐쉬 생성");
+            Log.Information($"[{cacheKey}] 캐쉬 생성");
             result = ownerAvatarUrl;
         }
 
