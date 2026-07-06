@@ -106,8 +106,10 @@ public class ConfigLoader
                 Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
             };
             File.WriteAllText("config.json", JsonSerializer.Serialize(mergedConfig, options));
+            
+            string configFullPath = Path.GetFullPath("config.json");
 
-            Log.Information("⚠ 새로운 설정 필드가 추가되어 config.json에 기본값을 반영했습니다:");
+            Log.Information($"⚠ 새로운 설정 필드가 추가되어 {configFullPath}에 기본값을 반영했습니다:");
             foreach (var field in missingFields)
             {
                 Log.Information($"  - {field}");

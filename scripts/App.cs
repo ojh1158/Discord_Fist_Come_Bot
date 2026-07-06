@@ -1,5 +1,7 @@
 using System.Reflection;
+using Camille.RiotGames;
 using Discord;
+using Discord.Interactions;
 using Discord.WebSocket;
 using DiscordBot.scripts.config;
 using DiscordBot.scripts.db;
@@ -66,8 +68,16 @@ public class App
 
          var serviceCollection = builder.Services;
          serviceCollection.AddSingleton(config);
+         
+         serviceCollection.AddSingleton(new DiscordSocketClient(discordConfig));
+
+         // 3. 💡 [중요] 라이엇 API를 명확하게 싱글톤으로 먼저 등록!
+         // if (config.Riot.Enable)
+         // {
+         //     serviceCollection.AddSingleton<RiotGamesApi>(provider => RiotGamesApi.NewInstance(config.Riot.ApiKey));
+         // }
+
          serviceCollection
-              .AddSingleton(new DiscordSocketClient(discordConfig))
             .AddQuartz()
             .AddLogging(configure =>
             {

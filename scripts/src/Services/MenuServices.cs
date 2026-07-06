@@ -12,12 +12,14 @@ public class MenuServices : BaseServices
 {
     private readonly PartyService partyService;
     private readonly PartyQueueServices partyQueueServices;
+    private readonly UserService userService;
     
-    public MenuServices(DiscordServices services, PartyService partyService, PartyQueueServices partyQueueServices) : base(services)
+    public MenuServices(DiscordServices services, PartyService partyService, PartyQueueServices partyQueueServices, UserService userService) : base(services)
     {
         Services.client.SelectMenuExecuted += HandleSelectMenuAsync;
         this.partyService = partyService;
         this.partyQueueServices = partyQueueServices;
+        this.userService = userService;
     }
 
     private async Task HandleSelectMenuAsync(SocketMessageComponent component)
@@ -101,63 +103,71 @@ public class MenuServices : BaseServices
                 var IsFullAlart = false;
                 var addCount = 0;
                 var list = new List<(ulong id, string name)>();
-
+                
+                var nicDic = await userService.GetUsersName(selectedValues.ToArray());
+                
                 foreach (var selectedValue in selectedValues)
                 {
-                    // 선택된 유저 ID를 파싱하여 파티에 추가
-                    // 예: selectedValue가 "123456789" (ulong)라면
-                    if (!ulong.TryParse(selectedValue, out var userId)) continue;
-                    IUser? user = Services.client.GetGuild(partyEntity.GUILD_KEY).GetUser(userId);
-                    user ??= await Services.client.GetUserAsync(userId); // RestUser 반환
-
-                    if (user is { IsBot: false })
+                    if (nicDic is not null && nicDic.TryGetValue(selectedValue, out var userName))
                     {
-                        string name;
+                        list.Add((ulong.Parse(selectedValue), userName));
+                        addCount++;
+                    }
+                    else
+                    {
+                        if (!ulong.TryParse(selectedValue, out var userId)) continue;
+                        IUser? user = Services.client.GetGuild(partyEntity.GUILD_KEY).GetUser(userId);
+                        user ??= await Services.client.GetUserAsync(userId); // RestUser 반환
 
-                        if (user is IGuildUser guildUser)
+                        if (user is { IsBot: false })
                         {
-                            name = guildUser.DisplayName;
-                        }
-                        else
-                        {
-                            // 길드에서 최신 유저 정보를 가져와서 닉네임 확인 (Rest API 사용)
-                            try
+                            string name;
+
+                            if (user is IGuildUser guildUser)
                             {
-                                var restGuild = await Services.client.Rest.GetGuildAsync(partyEntity.GUILD_KEY);
-                                if (restGuild != null)
+                                name = guildUser.DisplayName;
+                            }
+                            else
+                            {
+                                // 길드에서 최신 유저 정보를 가져와서 닉네임 확인 (Rest API 사용)
+                                try
                                 {
-                                    var guildUserInfo = await restGuild.GetUserAsync(userId);
-                                    if (guildUserInfo != null && !string.IsNullOrEmpty(guildUserInfo.Nickname))
+                                    var restGuild = await Services.client.Rest.GetGuildAsync(partyEntity.GUILD_KEY);
+                                    if (restGuild != null)
                                     {
-                                        // Rest API에서 가져온 닉네임 사용
-                                        name = guildUserInfo.Nickname;
+                                        var guildUserInfo = await restGuild.GetUserAsync(userId);
+                                        if (guildUserInfo != null && !string.IsNullOrEmpty(guildUserInfo.Nickname))
+                                        {
+                                            // Rest API에서 가져온 닉네임 사용
+                                            name = guildUserInfo.Nickname;
+                                        }
+                                        else
+                                        {
+                                            // 닉네임이 없으면 Username 사용
+                                            name = guildUserInfo?.GlobalName ?? user.Username;
+                                        }
                                     }
                                     else
                                     {
-                                        // 닉네임이 없으면 Username 사용
-                                        name = guildUserInfo?.GlobalName ?? user.Username;
+                                        name = user.GlobalName ?? user.Username;
                                     }
                                 }
-                                else
+                                catch
                                 {
                                     name = user.GlobalName ?? user.Username;
                                 }
                             }
-                            catch
-                            {
-                                name = user.GlobalName ?? user.Username;
-                            }
-                        }
 
-                        list.Add((user.Id, name));
-                        addCount++;
-
-                        if (!IsFullAlart)
-                        {
-                            IsFullAlart = partyEntity.Members.Count < partyEntity.MAX_COUNT_MEMBER &&
-                                          partyEntity.Members.Count + addCount >= partyEntity.MAX_COUNT_MEMBER;
+                            list.Add((user.Id, name));
+                            addCount++;
                         }
                     }
+                }
+                
+                if (!IsFullAlart)
+                {
+                    IsFullAlart = partyEntity.Members.Count < partyEntity.MAX_COUNT_MEMBER &&
+                                  partyEntity.Members.Count + addCount >= partyEntity.MAX_COUNT_MEMBER;
                 }
                 
                 var names = new string[list.Count];
@@ -169,7 +179,6 @@ public class MenuServices : BaseServices
                     ids[i] = tuple.id;
                     names[i] = tuple.name;
                 }
-
 
                 message = await partyQueueServices.QueueMany(partyEntity.PARTY_KEY, ids, names,
                     ActionType.Join, component);
@@ -186,7 +195,7 @@ public class MenuServices : BaseServices
                     if (IsFullAlart)
                         Services.SendUserAlert(partyEntity, component.User, Constant.JOIN_AUTO_KEY);
                     await component.DeleteOriginalResponseAsync();
-                    await component.Channel.SendMessageAsync($"{partyClass.userRoleString}님이 아래의 파티원을 초대하였습니다!\n" + message);
+                    await component.Channel.SendMessageAsync($"{partyClass.UserRoleString}님이 아래의 파티원을 초대하였습니다!\n" + message);
                 }
 
                 return;
@@ -233,7 +242,7 @@ public class MenuServices : BaseServices
                 }
                 
                 await component.DeleteOriginalResponseAsync();
-                await component.Channel.SendMessageAsync($"{partyClass.userRoleString}님이 아래의 파티원을 내보냈습니다.\n" + resultString);
+                await component.Channel.SendMessageAsync($"{partyClass.UserRoleString}님이 아래의 파티원을 내보냈습니다.\n" + resultString);
 
                 return;
             case Constant.MOVE_OWNER_KEY:

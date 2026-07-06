@@ -5,6 +5,7 @@ public class Config
     public TestConfig Test { get; set; } = new();
     public DiscordConfig Discord { get; set; } = new();
     public DatabaseConfig Database { get; set; } = new();
+    // public RiotConfig Riot { get; set; } = new();
     public DebugConfig Debug { get; set; } = new();
 }
 
@@ -24,6 +25,12 @@ public class DatabaseConfig
 {
     public string ConnectionString { get; set; } = string.Empty;
     public string TestConnectionString { get; set; } = string.Empty;
+}
+
+public class RiotConfig
+{
+    public bool Enable { get; set; } = false;
+    public string ApiKey { get; set; } = string.Empty;
 }
 
 public class DebugConfig

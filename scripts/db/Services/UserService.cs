@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Repositories;
 using DiscordBot.scripts.src;
@@ -74,5 +75,13 @@ public class UserService(DatabaseController databaseController, UserRepository u
         }
 
         return userRepository.SetUserSettingAsync(entity, connection, transaction);
+    }
+
+    public Task<ConcurrentDictionary<string, string>?> GetUsersName(params string[] userIds)
+    {
+        return databaseController.ExecuteInTransactionAsync(async (conn, trans) =>
+        {
+            return await userRepository.GetUserNames(userIds, conn, trans);
+        });
     }
 }

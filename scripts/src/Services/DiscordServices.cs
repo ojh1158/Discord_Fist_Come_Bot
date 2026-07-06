@@ -10,6 +10,7 @@ using DiscordBot.scripts.src.party;
 using DiscordBot.scripts.src.util;
 using Serilog;
 using Microsoft.Extensions.Caching.Memory;
+using Emoji = DiscordBot.scripts.src.util.Emoji;
 
 namespace DiscordBot.scripts.src.Services;
 
@@ -19,19 +20,20 @@ public class DiscordServices : ISingleton
     public readonly DiscordSocketClient client;
     private readonly PartyService _partyService;
     private readonly UserService _userService;
-    private readonly TaskDelayQueue _taskDelayQueue = new();
+    private readonly TaskDelayQueue _taskDelayQueue;
+    private readonly IServiceProvider _services;
 
-    public DiscordServices(DiscordSocketClient discord, PartyService partyService, UserService userService, TaskDelayQueue taskDelayQueue, Config config)
+    public DiscordServices(DiscordSocketClient discord, PartyService partyService, UserService userService, TaskDelayQueue taskDelayQueue, Config config, IServiceProvider services)
     {
         client = discord;
         _partyService = partyService;
         _userService = userService;
         _taskDelayQueue = taskDelayQueue;
+        _services = services;
         
         _ = Task.Run(async () =>
         {
             client.Log += LogAsync;
-            client.Ready += () => ReadyAsync(client);
 
             var token = config.Test.Enable
                 ? config.Discord.TestToken
@@ -55,106 +57,38 @@ public class DiscordServices : ISingleton
         return Task.CompletedTask;
     }
 
-    private async Task ReadyAsync(DiscordSocketClient client)
-    {
-        var commands = await client.GetGlobalApplicationCommandsAsync();
-
-        var array = new[]
-        {
-            new SlashCommandBuilder()
-                .WithName("파티")
-                .WithDescription($"파티를 생성합니다. 허용 인원은 {Constant.MIN_COUNT}-{Constant.MAX_COUNT} 입니다.")
-                .AddOption("이름", ApplicationCommandOptionType.String, "파티 이름", isRequired: true, minLength: 1,
-                    maxLength: Constant.MAX_NAME_COUNT)
-                .AddOption("인원", ApplicationCommandOptionType.Integer, "파티 인원", isRequired: true)
-                .AddOption(
-                    name: "시작시간설정",
-                    type: ApplicationCommandOptionType.Boolean,
-                    description: "시작 시간을 설정할지 결정합니다. (True = 설정)",
-                    isRequired: true
-                )
-                .AddOption(
-                    name: "채널선택",
-                    type: ApplicationCommandOptionType.Channel,
-                    description: "파티가 모일 채널을 선택하세요.",
-                    channelTypes: [ChannelType.Voice],
-                    isRequired: false
-                )
-        };
-
-        // 내용이 다르거나 없는 명령어 생성/업데이트
-        foreach (var commandBuilder in array)
-        {
-            var built = commandBuilder.Build();
-            var existing = commands.FirstOrDefault(c => c.Name == built.Name.Value);
-
-            if (existing == null || !CommandEquals(existing, built))
-            {
-                if (existing != null)
-                {
-                    await existing.DeleteAsync();
-                }
-
-                await client.CreateGlobalApplicationCommandAsync(built);
-            }
-        }
-
-        // array에 없는 명령어 삭제
-        foreach (var socketApplicationCommand in commands.Where(c => !array.Any(f => f.Name == c.Name)))
-        {
-            await socketApplicationCommand.DeleteAsync();
-        }
-
-        Log.Information($"{client.CurrentUser.Username} 봇이 준비되었습니다!");
-    }
-
-    public async Task UpdateMessage(SocketInteraction component, PartyEntity? party, bool isAllMessage = false, string message = "", TaskDelayQueue.DelayInfo? delayInfo = null)
+    public async Task UpdateMessage(SocketInteraction component, PartyEntity? party, bool isAllMessage = false, string message = "", bool useDelay = true)
     {
         if (party is not null)
         { 
-            var isKeepOnlyLast = delayInfo is not null;
+            var isUpdate = false;
+            var waitingCount = 0;
             
-            delayInfo ??= await _taskDelayQueue.EnqueueAndWaitAsync(party.MESSAGE_KEY.ToString(), false);
-
-            if (delayInfo is null or {WaitTcs: null})
+            if (useDelay)
             {
-                Log.Error("딜레이 정보가 왜 없냐...");
-                return;
+                isUpdate = await _taskDelayQueue.EnqueueAndWaitAsync(party.PARTY_KEY);
             }
-
-            delayInfo = await delayInfo.WaitTcs.Task;
+            else
+            {
+                isUpdate = true;
+            }
             
-            if (delayInfo is null or {WaitTcs: null})
-            {
-                Log.Error("딜레이 정보가 왜 없냐...");
-                return;
-            }
+            if (!isUpdate) return;
+            
+            var queueState = _taskDelayQueue.GetQueueState(party.PARTY_KEY);
+            if (queueState != null) waitingCount = queueState.WaitingCount;
 
-            if (isKeepOnlyLast && !delayInfo.IsLastRequest)
-            {
-                Log.Information("--마지막 요소가 아님--");
-                return;
-            }
-
-            var embeds = new Embed[delayInfo.WaitingCount > 0 ? 2 : 1];
+            var embeds = new Embed[waitingCount > 0 ? 2 : 1];
             var updatedEmbed = await UpdatedEmbed(party);
             var updatedComponent = UpdatedComponent(party);
             embeds[0] = updatedEmbed;
 
-            if (delayInfo.WaitingCount > 0)
+            if (waitingCount > 0)
             {
                 var embedBuilder = new EmbedBuilder();
                 embedBuilder.WithColor(Color.Red);
 
-                var waitingMessage =
-                    $"앞에 {delayInfo.WaitingCount}개의 요청을 처리중입니다... {PartyQueueServices.EmojiProcessing}";
-                if (delayInfo.DelaySeconds > 3 && delayInfo.WaitingCount != 0)
-                {
-                    waitingMessage += "\n요청이 자주 많아 슬로우 모드 중입니다...";
-                    waitingMessage += "\n**UI 업데이트만 느려집니다**";
-                }
-
-                
+                var waitingMessage = $"앞에 {waitingCount}개의 요청을 처리중입니다... {Emoji.Processing}";
                 embedBuilder.WithDescription(waitingMessage);
                 embeds[1] = embedBuilder.Build();
             }
@@ -170,7 +104,7 @@ public class DiscordServices : ISingleton
             
             if (!CacheManager.Cache.TryGetValue(cacheKey, out IUserMessage? originalMessage))
             {
-                Log.Information($"[{cacheKey}] 메세지 캐시 생성");
+                // Log.Information($"[{cacheKey}] 메세지 캐시 생성");
                 originalMessage = await component.Channel.GetMessageAsync(party.MESSAGE_KEY, options: options) as IUserMessage;
                 CacheManager.Cache.Set(cacheKey, originalMessage, CacheManager.GetOptions());
             }
@@ -325,34 +259,6 @@ public class DiscordServices : ISingleton
                 Log.Error($"[RespondMessageWithExpire] 삭제 실패: {ex.Message}");
             }
         });
-    }
-
-    private bool CommandEquals(SocketApplicationCommand existing, SlashCommandProperties built)
-    {
-        // Description 비교
-        if (existing.Description != built.Description.Value) return false;
-
-        // Options 개수 비교
-        var builtOptionsCount = built.Options.IsSpecified ? built.Options.Value.Count : 0;
-        if (existing.Options.Count != builtOptionsCount) return false;
-
-        // Options가 없으면 true
-        if (!built.Options.IsSpecified) return existing.Options.Count == 0;
-
-        var existingOptions = existing.Options.ToList();
-        var builtOptions = built.Options.Value.ToList();
-
-        for (int i = 0; i < existingOptions.Count; i++)
-        {
-            var e = existingOptions[i];
-            var b = builtOptions[i];
-
-            if (e.Name != b.Name || e.Type != b.Type ||
-                e.Description != b.Description)
-                return false;
-        }
-
-        return true;
     }
     
     public async Task<Embed> UpdatedEmbed(PartyEntity party)

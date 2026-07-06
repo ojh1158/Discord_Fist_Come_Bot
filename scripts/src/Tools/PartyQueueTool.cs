@@ -21,124 +21,108 @@ public class PartyQueueServices(
     ) : ISingleton
 {
     
-    public const string EmojiProcessing = "⏳"; // 처리 중 또는 대기 중
-    public const string EmojiComplete = "✅";   // 처리 완료
-    public const string EmojiFail = "❌";       // 처리 실패 (실패 케이스가 있을 경우)
     
-    private static readonly SemaphoreSlim _semaphore = new(1, 1);
+    private static readonly SemaphoreSlim slim1 = new(1, 1);
+    private static readonly SemaphoreSlim slim2 = new(1, 1);
     
-    public async Task<PartyQueueResult?> Queue(string partyId, ulong userId, string userNickName, ActionType type, SocketInteraction socketInteraction, bool isMessageUpdate = true)
+    public async Task<PartyQueueResult> Queue(string partyId, ulong userId, string userNickName, ActionType type, SocketInteraction socketInteraction, bool isMessageUpdate = true)
     {
-        if (_semaphore.CurrentCount == 0 && isMessageUpdate)
-        {
-            await socketInteraction.ModifyOriginalResponseAsync(m =>
-            {
-                m.Content = "순차 처리 대기중입니다...";
-                m.Components = null;
-                m.Embeds = null;
-            });
-        }
-        
-        await _semaphore.WaitAsync();
-        
-        var isError = false;
         var resultType = ActionType.Error;
-
-        var result = new PartyQueueResult
-        {
-            AfterEntity = null,
-            ResultType = ActionType.Error,
-            Id = userId,
-        };
+        PartyEntity? afterParty = null;
         
+        var IsLast = await delayQueue.EnqueueAndWaitAsync(partyId, async state =>
+        {
+            if (isMessageUpdate)
+            {
+                await socketInteraction.ModifyOriginalResponseAsync(m =>
+                {
+                    m.Content = $"{Emoji.Processing} 순차 처리 대기중입니다... 앞에 {state.WaitingCount - 1}명 있음";
+                    m.Components = null;
+                    m.Embeds = null;
+                });
+            }
+        });
+        
+        await slim1.WaitAsync();
+
         try
         {
-            var partyEntity = await partyService.GetPartyEntityAsync(partyId);
-            isError = partyEntity is null;
-            
             resultType = type switch
             {
                 ActionType.Join => await partyService.JoinPartyAsync(partyId, userId, userNickName),
                 ActionType.Leave => await partyService.LeavePartyAsync(partyId, userId),
                 _ => throw new ArgumentOutOfRangeException()
             };
-            
-            if (resultType is ActionType.Error or ActionType.Exists or ActionType.NoExists)
+
+            if (resultType is ActionType.Error or ActionType.PartyNull or ActionType.Exists or ActionType.NoExists)
             {
-                Log.Error($"[{userId}]({userNickName}) {resultType.Comment()}");
-                isError = true;
+                if (resultType is ActionType.Error or ActionType.PartyNull)
+                    Log.Error($"[{userId}]({userNickName}) {resultType.Comment()}");
             }
+            
+            afterParty = await partyService.GetPartyEntityAsync(partyId);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, $"[{userId}]({userNickName}) {resultType.Comment()}");
         }
         finally
         {
-            _semaphore.Release();
+            slim1.Release();
         }
         
-        var delayInfo = await delayQueue.EnqueueAndWaitAsync(partyId, true);
-        
-            
-        if (delayInfo is null)
+        await slim2.WaitAsync();
+
+        try
         {
-            Log.Error($"[{userId}]({userNickName}) delayInfo null 오류");
-        }
-        else if (Math.Abs(delayInfo.DelaySeconds - TaskDelayQueue.MaxDelaySeconds) < 0)
-        {
-            await socketInteraction.ModifyOriginalResponseAsync(m =>
+            if (!IsLast)
             {
-                m.Content = $"{EmojiProcessing} 순차 처리 대기중입니다...";
-                m.Components = null;
-                m.Embeds = null;
-            });
+                await ResponseUpdateAsync();
+
+                return GetResult();
+            }
+            
+            await discordServices.UpdateMessage(socketInteraction, afterParty, useDelay: false);
+            
+            await ResponseUpdateAsync();  
+            
+            return GetResult();
+        }
+        catch (Exception e)
+        {
+            Log.Error(e, $"[{userId}]({userNickName}) {resultType.Comment()}");
+            return GetResult();
+        }
+        finally
+        {
+            slim2.Release();
         }
 
-        
-        else if (!isError)
+#region 지역 함수
+        PartyQueueResult GetResult()
         {
-            // Log.Information($"[{userId}]({userNickName}) {delayInfo.WaitingCount} 웨이터");
-            var afterParty = await partyService.GetPartyEntityAsync(partyId);
-                
-            if (isMessageUpdate && delayInfo.WaitingCount - 1 >= 1)
+            return new PartyQueueResult
+            {
+                AfterEntity = afterParty,
+                ResultType = resultType,
+                Id = userId
+            };
+        }
+
+        async Task ResponseUpdateAsync()
+        {
+            if (isMessageUpdate)
             {
                 await socketInteraction.ModifyOriginalResponseAsync(m =>
                 {
-                    m.Content = $"{EmojiProcessing} 순차 처리 대기중입니다...";
+                    m.Content = resultType.Comment();
                     m.Components = null;
                     m.Embeds = null;
                 });
+                _ = discordServices.RespondMessageWithExpire(socketInteraction);
             }
-
-            if (delayInfo.WaitTcs is not null)
-            {
-                var task = await delayInfo.WaitTcs.Task;
-                    
-                result = new PartyQueueResult
-                {
-                    AfterEntity = afterParty,
-                    ResultType = resultType,
-                    Id = userId,
-                };
-                    
-                if (task is not null)
-                {
-                    // Log.Information($"[{userId}]({userNickName}) ======= 업데이트 =======");
-                    _ = discordServices.UpdateMessage(socketInteraction, afterParty, delayInfo: delayInfo);    
-                }
-            }
-                
         }
-
-        if (isMessageUpdate)
-        {
-            await socketInteraction.ModifyOriginalResponseAsync(m =>
-            {
-                m.Content = resultType.Comment();
-                m.Components = null;
-                m.Embeds = null;
-            });
-            _ = discordServices.RespondMessageWithExpire(socketInteraction);
-        }
-        
-        return result;
+#endregion
     }
 
     public async Task<string?> QueueMany(string partyId, ulong[] userIds, string[] userNickNames, ActionType type, SocketInteraction socketInteraction)
@@ -149,9 +133,8 @@ public class PartyQueueServices(
             Log.Error("길이가 맞지 않습니다");
             return null;
         }
-
         
-        var tasks = new List<Task<PartyQueueResult?>>(userIds.Length);
+        var tasks = new List<Task<PartyQueueResult>>(userIds.Length);
         var dicName = new Dictionary<ulong, string>();
         var dicType = new Dictionary<ulong, ActionType>();
         
@@ -160,36 +143,24 @@ public class PartyQueueServices(
             dicName.Add(userIds[i], userNickNames[i]);
             dicType.Add(userIds[i], ActionType._);
         }
+
+
+        var state = delayQueue.GetQueueState(partyId);
         
-       
-        var delayInfo = delayQueue.GetDelayInfo(partyId, true);
-        
-        if (delayInfo is not null && delayInfo.WaitingCount - 1 > userIds.Length)
+        if (state is not null && state.WaitingCount > 0)
         {
             await socketInteraction.ModifyOriginalResponseAsync(m =>
             {
-                m.Content = "순차 처리 대기중입니다...";
+                m.Content = $"{Emoji.Processing} 순차 처리 대기중입니다... 앞에 {state.WaitingCount}명 있음";
                 m.Components = null;
                 m.Embeds = null;
             });
         }
-
-        // _ = Task.Run(async () =>
-        // {
-        //     for (var i = 0; i < userIds.Length; i++)
-        //     {
-        //         var result = await Queue(partyId, userIds[i], userNickNames[i], type, socketInteraction,
-        //             isMessageUpdate: false);
-        //         if (result is null) continue;
-        //         dicType[result.Id] = result.ResultType;
-        //     }
-        // });
         
         for (var i = 0; i < userIds.Length; i++)
         {
             tasks.Add(Queue(partyId, userIds[i], userNickNames[i], type, socketInteraction, isMessageUpdate: false));
         }
-        
         
         _ = Task.Run(() =>
         {
@@ -199,9 +170,8 @@ public class PartyQueueServices(
                 _ = Task.Run(async () =>
                 {
                     var resultData = await tcs1;
-                    
-                    if (resultData is not null)
-                        dicType[resultData.Id] = resultData.ResultType;
+
+                    dicType[resultData.Id] = resultData.ResultType;
                 });
             }
         });
@@ -215,11 +185,7 @@ public class PartyQueueServices(
             var count = dicType.Count(d => d.Value is not ActionType._);
             if (count < targetCount)
             {
-                delayInfo = await delayQueue.EnqueueAndWaitAsync(message.Id.ToString(), false);
-                if (delayInfo is {WaitTcs: not null})
-                {
-                    await delayInfo.WaitTcs.Task;
-                }
+                await delayQueue.EnqueueAndWaitAsync(message.Id.ToString());
                 continue;
             }
             targetCount = count;
@@ -233,6 +199,9 @@ public class PartyQueueServices(
 
             if (exit) break;
         }
+        
+        // var afterParty = await partyService.GetPartyEntityAsync(partyId);
+        // await discordServices.UpdateMessage(socketInteraction, afterParty, useDelay: false);
 
         return GetUserQueueStatus(dicName, dicType);
     }
@@ -250,15 +219,19 @@ public class PartyQueueServices(
             switch (resultType)
             {
                 case ActionType._:
-                    emoji = EmojiProcessing;
+                    emoji = Emoji.Processing;
                     status = "아직 작업이 처리되지 않았습니다.";
                     break;
                 case ActionType.Join:
-                    emoji = EmojiComplete;
+                    emoji = Emoji.Join;
+                    status = resultType.Comment();
+                    break;
+                case ActionType.Leave:
+                    emoji = Emoji.Leave;
                     status = resultType.Comment();
                     break;
                 default:
-                    emoji = EmojiFail;
+                    emoji = Emoji.Fail;
                     status = resultType.Comment();
                     break;
             }
@@ -276,6 +249,5 @@ public class PartyQueueServices(
         public required PartyEntity? AfterEntity { get; init; }
         public required ActionType ResultType { get; init; }
         public required ulong Id { get; init; }
-        public string? Message { get; set; }
     }
 }

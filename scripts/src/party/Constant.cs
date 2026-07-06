@@ -4,12 +4,12 @@ namespace DiscordBot.scripts.src.party;
 public class Constant
 {
     public const int MIN_COUNT = 1;
-    public const int MAX_COUNT = 200;
+    public const int MAX_COUNT = 100;
     public const int MAX_HOUR = 168;
     
     public const int MAX_NAME_COUNT = 50;
     
-    public const string VERSION = "2.2.0";
+    public const string VERSION = "2.2.3";
 
     public const string JOIN_KEY = "참가";
     public const string LEAVE_KEY = "나가기";

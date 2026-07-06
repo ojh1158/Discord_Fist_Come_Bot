@@ -1,3 +1,4 @@
+using System.Text;
 using Discord;
 using Discord.WebSocket;
 using DiscordBot.scripts.db.Models;
@@ -113,13 +114,13 @@ public class ButtonServices : BaseServices
         switch (action)
         {
             case Constant.JOIN_KEY:
-                var result = await partyQueueServices.Queue(party.PARTY_KEY, partyClass.userId, partyClass.userNickname, ActionType.Join, component);
+                var result = await partyQueueServices.Queue(party.PARTY_KEY, partyClass.UserId, partyClass.UserNickname, ActionType.Join, component);
                 if (result?.AfterEntity is null || result.ResultType is not ActionType.Join) return;
                 Services.SendUserAlert(result.AfterEntity, component.User, action);
                 return;
                 
             case Constant.LEAVE_KEY:
-                result = await partyQueueServices.Queue(party.PARTY_KEY, partyClass.userId, partyClass.userNickname, ActionType.Leave, component);
+                result = await partyQueueServices.Queue(party.PARTY_KEY, partyClass.UserId, partyClass.UserNickname, ActionType.Leave, component);
                 try
                 {
                     if (result?.AfterEntity is null || result.ResultType is not ActionType.Leave) return;
@@ -149,22 +150,22 @@ public class ButtonServices : BaseServices
                 
                 componentBuilder.WithButton("개인 알림 설정",$"{Constant.USER_ALERT_SETTING_KEY}_{Constant.USER_ALERT_SETTING_OPEN_KEY}", ButtonStyle.Success, row:0);
 
-                if (partyClass is {isAdmin: true} or {isPartyMember: true} or {isOwner: true} or {isWater:true})
+                if (partyClass is {IsAdmin: true} or {IsPartyMember: true} or {IsOwner: true} or {IsWater:true})
                 {
                     // componentBuilder.WithButton(Constant.PULLING_UP_KEY,$"{Constant.PULLING_UP_KEY}_{partyKey}", ButtonStyle.Success, row:1);
                     componentBuilder.WithButton(Constant.TEAM_KEY,$"{Constant.TEAM_KEY}_{partyKey}", ButtonStyle.Success, row:1);
                 }
 
-                if (partyClass is {isAdmin: true} or {isPartyMember: true} or {isOwner: true} && party.Members.Count >= 1)
+                if (partyClass is {IsAdmin: true} or {IsPartyMember: true} or {IsOwner: true} && party.Members.Count >= 1)
                 {
                     componentBuilder.WithButton(Constant.PING_KEY, $"{Constant.PING_KEY}_{partyKey}", ButtonStyle.Success, row:1);
-                    if (partyClass.isAdmin || partyClass.isOwner)
+                    if (partyClass.IsAdmin || partyClass.IsOwner)
                     {
                         componentBuilder.WithButton(Constant.KICK_KEY,$"{Constant.KICK_KEY}_{partyKey}", ButtonStyle.Primary, row:2);
                     }
                 }
 
-                if (partyClass.isAdmin || partyClass.isOwner)
+                if (partyClass.IsAdmin || partyClass.IsOwner)
                 {
                     componentBuilder.WithButton(Constant.JOIN_AUTO_KEY, $"{Constant.JOIN_AUTO_KEY}_{partyKey}", ButtonStyle.Primary, row:2);
                     componentBuilder.WithButton(Constant.PARTY_KEY,$"{Constant.PARTY_KEY}_{partyKey}", ButtonStyle.Primary, row:2);
@@ -189,7 +190,7 @@ public class ButtonServices : BaseServices
                 var closed = party.IS_CLOSED;
                 var e = party.IS_CLOSED ? "오픈" : "마감";
                 
-                if (partyClass is { isOwner: false, isAdmin: false })
+                if (partyClass is { IsOwner: false, IsAdmin: false })
                 {
                     await component.ModifyOriginalResponseAsync(msg =>
                     {
@@ -216,12 +217,12 @@ public class ButtonServices : BaseServices
                 await Services.RespondMessageWithExpire(component);
                 
                 party.IS_CLOSED = !closed;
-                message = $"{partyClass.userRoleString}님이 {party.DISPLAY_NAME} 파티를 {e}하였습니다.";
+                message = $"{partyClass.UserRoleString}님이 {party.DISPLAY_NAME} 파티를 {e}하였습니다.";
                 isAllMessage = true;
                 break;
             case Constant.PING_KEY:
-                
-                if (partyClass is { isOwner: false, isAdmin: false, isPartyMember: false })
+    
+                if (partyClass is { IsOwner: false, IsAdmin: false, IsPartyMember: false })
                 {
                     await component.ModifyOriginalResponseAsync(msg =>
                     {
@@ -230,20 +231,35 @@ public class ButtonServices : BaseServices
                     await Services.RespondMessageWithExpire(component);
                     return;
                 }
-                
+    
                 await component.ModifyOriginalResponseAsync(msg =>
                 {
                     msg.Content = "✅ 파티원을 호출했습니다.";
                 });
                 await Services.RespondMessageWithExpire(component);
-                
-                var mentions = string.Join(" ", party.Members[..Math.Min(party.MAX_COUNT_MEMBER, party.Members.Count)].Select(m => $"<@{m.USER_ID}>"));
+    
+                // 1. 안전하게 현재 파티원 전원의 멘션 문자열 배열을 만듭니다.
+                var allMentions = party.Members[..Math.Min(party.Members.Count, party.MAX_COUNT_MEMBER)].Select(m => $"<@{m.USER_ID}>");
+    
+                // 2. 💡 .Chunk(50)을 사용하여 50명씩 덩어리로 쪼갭니다.
+                var chunks = allMentions.Chunk(50);
+    
+                // 3. StringBuilder를 사용해 50명 단위로 줄바꿈을 하며 합쳐줍니다.
+                var sb = new StringBuilder();
+                sb.AppendLine($"🔔 {partyClass.UserRoleString}님이 파티원을 호출하였습니다!");
+    
+                foreach (var chunk in chunks)
+                {
+                    // 50명의 멘션을 한 줄로 묶어서 추가
+                    sb.AppendLine(string.Join(" ", chunk)); 
+                }
+    
                 isAllMessage = true;
-                message = $"🔔 {partyClass.userRoleString}님이 파티원을 호출하였습니다!\n{mentions}";
+                message = sb.ToString();
                 break;
             case Constant.EXPIRE_KEY:
                 
-                if (partyClass is { isOwner: false, isAdmin: false })
+                if (partyClass is { IsOwner: false, IsAdmin: false })
                 {
                     await component.ModifyOriginalResponseAsync(msg =>
                     {
@@ -305,22 +321,44 @@ public class ButtonServices : BaseServices
                 });
                 return;
             case Constant.KICK_KEY:
-                
-                var menuBuilder = new SelectMenuBuilder()
-                    .WithCustomId($"{Constant.KICK_KEY}_{partyKey}")
-                    .WithPlaceholder("강퇴할 유저를 선택하세요")
-                    .WithMinValues(1)
-                    .WithMaxValues(25)
-                    .WithType(ComponentType.UserSelect);
-                
-                var build = new ComponentBuilder()
-                    .WithSelectMenu(menuBuilder)
-                    .Build();
+                componentBuilder = new ComponentBuilder();
+                var members = partyEntity!.Members.ToList();
+    
+                // 25명 단위로 쪼개서 드롭다운을 여러 개 만듭니다.
+                int pageSize = 25;
+                int totalCount = members.Count;
+                int pageCount = (int)Math.Ceiling((double)totalCount / pageSize);
+
+                for (int i = 0; i < pageCount; i++)
+                {
+                    // 25명씩 리스트 자르기
+                    var pageMembers = members.Skip(i * pageSize).Take(pageSize).ToList();
+        
+                    // 드롭다운 customId에 몇 번째 구역인지 구분 ID를 살짝 얹어줍니다.
+                    var menuBuilder = new SelectMenuBuilder()
+                        .WithCustomId($"{Constant.KICK_KEY}_{partyKey}_part{i}")
+                        .WithPlaceholder($"강퇴 유저 선택 ({i * pageSize + 1} ~ {Math.Min((i + 1) * pageSize, totalCount)}번)");
+
+                    // 최소/최대 선택 수 지정 (해당 구역 멤버 수 기준)
+                    menuBuilder.WithMinValues(1);
+                    menuBuilder.WithMaxValues(pageMembers.Count);
+
+                    foreach (var member in pageMembers)
+                    {
+                        menuBuilder.AddOption(
+                            label: member.USER_NICKNAME,
+                            value: member.USER_ID.ToString()
+                        );
+                    }
+
+                    // 💡 25명짜리 드롭다운을 컴포넌트에 한 줄씩 누적 추가
+                    componentBuilder.WithSelectMenu(menuBuilder);
+                }
 
                 await component.ModifyOriginalResponseAsync(msg =>
                 {
                     msg.Content = $"⚠️ 강퇴할 유저를 선택하세요";
-                    msg.Components = build;
+                    msg.Components = componentBuilder.Build();
                 });
                 return;
             case Constant.TEAM_KEY:
@@ -389,7 +427,7 @@ public class ButtonServices : BaseServices
                         msg.Components = null;
                     });
                     _ = Services.RespondMessageWithExpire(component);
-                    message = $"❌ {partyClass.userRoleString}님이 파티를 만료시켰습니다.";
+                    message = $"❌ {partyClass.UserRoleString}님이 파티를 만료시켰습니다.";
                     isAllMessage = true;
                 }
                 else

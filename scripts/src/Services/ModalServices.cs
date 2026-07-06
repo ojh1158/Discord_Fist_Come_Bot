@@ -120,7 +120,7 @@ public class ModalServices : BaseServices
                         resizeOk = false;
                     }
 
-                    if (partyClass is { isOwner: false, isAdmin: false })
+                    if (partyClass is { IsOwner: false, IsAdmin: false })
                     {
                         message += $"인원 오류: 파티장 또는 관리자만 인원을 변경할 수 있습니다.\n";
                         resizeOk = false;
@@ -171,7 +171,9 @@ public class ModalServices : BaseServices
                     _ = Services.RespondMessageWithExpire(modal);
                     return;
                 }
-                var partyMemberEntities = party.Members[..party.MAX_COUNT_MEMBER];
+
+                var range = (int)MathF.Min(party.MAX_COUNT_MEMBER, party.Members.Count);
+                var partyMemberEntities = party.Members[..range];
 
                 if (Math.Min(partyMemberEntities.Count, 10) < teamCount)
                 {
@@ -241,7 +243,7 @@ public class ModalServices : BaseServices
                 await mg.ModifyAsync(m =>
                 {
                     m.Components = cb.Build();
-                    m.Content = $"{partyClass.userRoleString} 님이 {teamCount}개의 팀을 뽑았습니다!";
+                    m.Content = $"{partyClass.UserRoleString} 님이 {teamCount}개의 팀을 뽑았습니다!";
                     m.Embeds = result.ToArray();
                 });
                 return;

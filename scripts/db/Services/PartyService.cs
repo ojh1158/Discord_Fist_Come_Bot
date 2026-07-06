@@ -39,7 +39,7 @@ public class PartyService(DatabaseController databaseController, UserRepository 
         {
             var nowParty = await partyRepository.GetPartyEntity(partyKey, conn, trans);
 
-            if (nowParty == null) return ActionType.Error;
+            if (nowParty == null) return ActionType.PartyNull;
             
             if (nowParty.Members.Exists(m => m.USER_ID == userId)
                 || nowParty.WaitMembers.Exists(m => m.USER_ID == userId))

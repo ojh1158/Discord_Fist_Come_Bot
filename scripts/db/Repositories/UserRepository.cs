@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Dapper;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.src;
@@ -40,33 +41,33 @@ WHERE USER_ID = @userId
     {
             var entity = await connection.QueryAsync<StartAlertEntity>(
                 @"
-        WITH HISTORY AS (
-        SELECT *
-        FROM PARTY_START_ALERT_HISTORY
-        )
-        SELECT
-        P.CHANNEL_KEY,
-        CAST(P.PARTY_KEY AS CHAR(36)) AS PARTY_KEY,
-        P.DISPLAY_NAME,
-        PM.USER_ID
-        FROM PARTY AS P
-         LEFT JOIN PARTY_MEMBER AS PM
-                   ON PM.PARTY_KEY = P.PARTY_KEY
-         LEFT JOIN USER_CONFIG AS UC
-                   ON UC.USER_ID = PM.USER_ID
-        WHERE NOT EXISTS (
-        SELECT 1
-        FROM HISTORY H
-        WHERE H.PARTY_KEY = P.PARTY_KEY
-        AND H.CHANGE_TIME_FLAG = FALSE
-        )
-        AND P.IS_EXPIRED = 0
-        AND P.START_DATE IS NOT NULL
-        AND P.START_DATE > NOW()
-        AND P.START_DATE <= DATE_ADD(NOW(), INTERVAL 5 MINUTE)
-        AND PM.EXIT_FLAG = 0
-        AND UC.ALL_ALERT_FLAG = 1 AND UC.PARTY_START_TIME_ALERT_FLAG = 1
-        GROUP BY PM.USER_ID, P.PARTY_KEY, P.CHANNEL_KEY, P.DISPLAY_NAME
+WITH HISTORY AS (
+SELECT *
+FROM PARTY_START_ALERT_HISTORY
+)
+SELECT
+P.CHANNEL_KEY,
+CAST(P.PARTY_KEY AS CHAR(36)) AS PARTY_KEY,
+P.DISPLAY_NAME,
+PM.USER_ID
+FROM PARTY AS P
+ LEFT JOIN PARTY_MEMBER AS PM
+           ON PM.PARTY_KEY = P.PARTY_KEY
+ LEFT JOIN USER_CONFIG AS UC
+           ON UC.USER_ID = PM.USER_ID
+WHERE NOT EXISTS (
+SELECT 1
+FROM HISTORY H
+WHERE H.PARTY_KEY = P.PARTY_KEY
+AND H.CHANGE_TIME_FLAG = FALSE
+)
+AND P.IS_EXPIRED = 0
+AND P.START_DATE IS NOT NULL
+AND P.START_DATE > NOW()
+AND P.START_DATE <= DATE_ADD(NOW(), INTERVAL 5 MINUTE)
+AND PM.EXIT_FLAG = 0
+AND UC.ALL_ALERT_FLAG = 1 AND UC.PARTY_START_TIME_ALERT_FLAG = 1
+GROUP BY PM.USER_ID, P.PARTY_KEY, P.CHANNEL_KEY, P.DISPLAY_NAME
         "
                 , transaction: transaction);
 
@@ -150,5 +151,35 @@ ON DUPLICATE KEY UPDATE
 
         var affectedRows = await connection.ExecuteAsync(sql, parameters, transaction: transaction);
         return affectedRows > 0;
+    }
+
+    public async Task SetUserName(ulong userId, string name, MySqlConnection connection, MySqlTransaction? transaction = null)
+    {
+        
+    }
+
+    public async Task<ConcurrentDictionary<string, string>> GetUserNames(string[] userIds, MySqlConnection connection,
+        MySqlTransaction? transaction = null)
+    {
+        var result = await connection.QueryAsync<PartyMemberEntity>(@"
+SELECT USER_ID, USER_NICKNAME 
+FROM (
+    SELECT USER_ID, USER_NICKNAME, 
+           ROW_NUMBER() OVER (PARTITION BY USER_ID ORDER BY COUNT(*) DESC, USER_NICKNAME DESC) as rn
+    FROM PARTY_MEMBER
+    WHERE USER_ID IN @userIds
+    GROUP BY USER_ID, USER_NICKNAME
+) t
+WHERE rn = 1
+", new { userIds }, transaction: transaction);
+
+        var partyMemberEntities = result as PartyMemberEntity[] ?? result.ToArray();
+        var results = new ConcurrentDictionary<string, string>();
+        foreach (var partyMemberEntity in partyMemberEntities)
+        {
+            results.TryAdd(partyMemberEntity.USER_ID.ToString(), partyMemberEntity.USER_NICKNAME);
+        }
+
+        return results;
     }
 }
