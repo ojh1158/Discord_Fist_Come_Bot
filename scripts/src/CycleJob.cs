@@ -1,4 +1,5 @@
 using Discord;
+using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Services;
 using DiscordBot.scripts.src.Services;
 using Quartz;
@@ -52,7 +53,7 @@ public class CycleJob(PartyService partyService, DiscordServices discordServices
     {
         Task.Run(async () =>
         {
-            var alertUsers = await userService.GetAlertUsers();
+            var alertUsers = await userService.GetAlertUsers() ?? [];
             
             foreach (var entity in alertUsers)
             {

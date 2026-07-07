@@ -10,7 +10,7 @@ namespace DiscordBot.scripts.db.Services;
 /// 사용자 설정 비즈니스 로직 처리 (Service Layer)
 /// Repository 메서드에 Lock이 내장되어 있어 간단하게 호출 가능
 /// </summary>
-public class UserService(DatabaseController databaseController, UserRepository userRepository) : ISingleton
+public class UserService(DatabaseController databaseController, UserRepository userRepository, PartyRepository partyRepository) : ISingleton
 {
     /// <summary>
     /// 사용자 알림 설정 조회
@@ -40,24 +40,51 @@ public class UserService(DatabaseController databaseController, UserRepository u
     {
         return await databaseController.ExecuteInTransactionAsync(async (conn, trans) =>
         {
+            List<StartAlertEntity> startAlertEntities = [];
+            HashSet<ulong> userIDHash = [];
+            HashSet<ulong> alertingUserIDHash = [];
+            
             var alertEntities = await userRepository.GetAlertUsers(conn, trans);
+            
+            foreach (var startAlertEntity in alertEntities)
+            {
+                userIDHash.Add(startAlertEntity.USER_ID);
+            }
 
             // 1. Null 체크 추가 (에러 방지)
-            if (alertEntities == null || !alertEntities.Any())
+            if (alertEntities.Count == 0)
             {
-                return new List<StartAlertEntity>();
+                return [];
             }
 
-            var groupBy = alertEntities.GroupBy(d => d.PARTY_KEY!, d => d);
-        
-            // 2. Task.Run 제거. 트랜잭션 내에서는 반드시 await로 순차 실행해야 함
-            foreach (var group in groupBy)
+            var groupBy = alertEntities.GroupBy(d => d.PARTY_KEY!, d => d).ToArray();
+
+            foreach (var grouping in groupBy)
             {
-                // Insert 작업이 끝날 때까지 기다려야 트랜잭션이 유지됨
-                await userRepository.InsertAlertParty(group.Key, conn, trans);
+                var partyEntity = await partyRepository.GetPartyEntity(grouping.Key, conn, trans);
+                
+                await userRepository.InsertAlertParty(grouping.Key, conn, trans);
+                
+                if (partyEntity is null) continue;
+                
+                foreach (var partyMemberEntity in partyEntity.MemberOnly)
+                {
+                    if (userIDHash.Contains(partyMemberEntity.USER_ID))
+                    {
+                        alertingUserIDHash.Add(partyMemberEntity.USER_ID);
+                    }
+                }
+            }
+
+            foreach (var startAlertEntity in alertEntities)
+            {
+                if (alertingUserIDHash.Contains(startAlertEntity.USER_ID))
+                {
+                    startAlertEntities.Add(startAlertEntity);
+                }
             }
     
-            return alertEntities.ToList(); // 이미 가져온 리스트를 반환
+            return startAlertEntities; // 이미 가져온 리스트를 반환
         });
     }
 
