@@ -597,7 +597,12 @@ public class DiscordServices : ISingleton
         var embedBuilder = new EmbedBuilder();
         
         var state = datePickerState ?? new DatePickerState();
-        if (!time.HasValue && datePickerState is null)
+
+        if (time.HasValue)
+        {
+            state.FromDateTime(time.Value);
+        }
+        else if (!time.HasValue && datePickerState is null)
         {
             var t = DateTime.Now.AddHours(1);
             state.FromDateTime(t.Date.AddHours(t.Hour));

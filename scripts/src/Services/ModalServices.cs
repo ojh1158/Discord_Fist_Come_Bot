@@ -1,7 +1,9 @@
 using Discord;
 using Discord.WebSocket;
+using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Services;
 using DiscordBot.scripts.src.party;
+using DiscordBot.scripts.src.Tools;
 using Serilog;
 
 namespace DiscordBot.scripts.src.Services;
@@ -28,11 +30,13 @@ public class ModalServices : BaseServices
     };
     
     private readonly PartyService partyService;
+    private readonly TeamTool teamTool;
     
-    public ModalServices(DiscordServices services, PartyService partyService) : base(services)
+    public ModalServices(DiscordServices services, PartyService partyService, TeamTool teamTool) : base(services)
     {
         Services.client.ModalSubmitted += HandleModalAsync;
         this.partyService = partyService;
+        this.teamTool = teamTool;
     }
 
     private async Task HandleModalAsync(SocketModal modal)
@@ -182,49 +186,8 @@ public class ModalServices : BaseServices
                     return;
                 }
                 
-                var randomList = new List<ulong>();
-                
-                foreach (var entity in partyMemberEntities) randomList.Add(entity.USER_ID);
-                
-                // 여기서 셔플
-                var rng = Random.Shared;
-                for (int i = randomList.Count - 1; i > 0; i--)
-                {
-                    var j = rng.Next(i + 1);
-                    (randomList[i], randomList[j]) = (randomList[j], randomList[i]);
-                }
-                
-                var result = new List<Embed>();
-
-                int membersPerTeam = (int)Math.Ceiling((double)randomList.Count / teamCount);
-                int memberIndex = 0;
-
-                for (int i = 0; i < teamCount; i++)
-                {
-                    // 현재 팀에 할당할 멤버 수 계산
-                    int currentTeamSize = membersPerTeam;
-                    if (i == teamCount - 1)
-                    {
-                        // 마지막 팀은 나머지 멤버 모두 할당
-                        currentTeamSize = randomList.Count - memberIndex;
-                    }
-                    
-                    // 현재 팀의 멤버 리스트 생성
-                    var teamMembers = new List<string>();
-                    for (int j = 0; j < currentTeamSize && memberIndex < randomList.Count; j++)
-                    {
-                        var random = randomList[memberIndex];
-                        teamMembers.Add($"<@{random}> ({partyMemberEntities.Find(f => f.USER_ID == random)?.USER_NICKNAME ?? "알 수 없음"})");
-                        memberIndex++;
-                    }
-                    
-                    var team = new EmbedBuilder();
-                    team.WithTitle($"{i + 1}팀");
-                    team.WithColor(colors[i % colors.Length]);
-                    team.WithDescription(string.Join("\n", teamMembers));
-                    result.Add(team.Build());
-                }
-                
+                var mg = await modal.Channel.SendMessageAsync("초기화 중...");
+                await teamTool.Random(partyClass, party, mg, countInput.Value);
                 if (modal.HasResponded)
                 {
                     await modal.DeleteOriginalResponseAsync();
@@ -233,19 +196,7 @@ public class ModalServices : BaseServices
                 {
                     await modal.RespondAsync("생성하였습니다", ephemeral: true);
                 }
-
-                var cb = new ComponentBuilder();
-
-                var mg = await modal.Channel.SendMessageAsync("초기화 중...");
-                cb.WithButton(Constant.TEAM_REMOVE_KEY, $"{Constant.TEAM_REMOVE_KEY}_{mg.Id}", ButtonStyle.Danger);
-
                 
-                await mg.ModifyAsync(m =>
-                {
-                    m.Components = cb.Build();
-                    m.Content = $"{partyClass.UserRoleString} 님이 {teamCount}개의 팀을 뽑았습니다!";
-                    m.Embeds = result.ToArray();
-                });
                 return;
         }
         

@@ -238,7 +238,8 @@ public class SlashCommandServices : BaseServices
             msg = await command.Channel.SendMessageAsync($"초기화 중입니다...");
         }
         
-        var appointeeInput = commandOptions.FirstOrDefault(x => x.Name == "내정자목록")?.Value?.ToString();
+        var appointeeInput = commandOptions.FirstOrDefault(x => x.Name == "내정자목록")?.Value?.ToString() ?? "";
+        appointeeInput = $"<@{command.User.Id}> " + appointeeInput;
         var appointeeUserIds = new Dictionary<ulong, string>();
 
         var restGuild = await Services.client.Rest.GetGuildAsync(command.GuildId ?? 0);
@@ -302,24 +303,17 @@ public class SlashCommandServices : BaseServices
         
         if (appointeeUserIds.Count != 0)
         {
-            ulong[] userIds = new ulong[appointeeUserIds.Count];
-            string[] names = new string[appointeeUserIds.Count];
-
-            var dicCount = 0;
             foreach (var (key, value) in appointeeUserIds)
             {
-                userIds[dicCount] = key;
-                names[dicCount++] = value;
+                await _partyService.JoinPartyAsync(party.PARTY_KEY, key, value);
             }
             
             var isFullAlart = party.Members.Count < party.MAX_COUNT_MEMBER &&
                           party.Members.Count + appointeeUserIds.Count >= party.MAX_COUNT_MEMBER;
             
-            await _partyQueueServices.QueueMany(party.PARTY_KEY, userIds, names, ActionType.Join, command);
-            
             party = await _partyService.GetPartyEntityAsync(party.PARTY_KEY);
             
-            if (party is not null)
+            if (party is not null && appointeeUserIds.Count > 1)
             {
                 await Services.UpdateMessage(command, party);
                 

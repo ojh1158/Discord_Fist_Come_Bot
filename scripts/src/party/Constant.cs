@@ -9,7 +9,7 @@ public class Constant
     
     public const int MAX_NAME_COUNT = 50;
     
-    public const string VERSION = "2.2.3";
+    public const string VERSION = "2.2.4";
 
     public const string JOIN_KEY = "참가";
     public const string LEAVE_KEY = "나가기";
@@ -33,6 +33,7 @@ public class Constant
     public const string EXPIRE_TIME_OPEN_KEY = "만료 시간 선택";
     public const string TEAM_KEY = "팀 만들기";
     public const string TEAM_REMOVE_KEY = "팀 삭제";
+    public const string TEAM_AGAIN_KEY = "팀 다시 만들기";
 
     public const string DATE_PICKUP_KEY = "날짜 선택기";
     public const string DATE_PICKUP_FIRST_KEY = "처음 날짜 선택 시";

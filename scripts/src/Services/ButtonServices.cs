@@ -1,9 +1,12 @@
+using System.Globalization;
 using System.Text;
 using Discord;
+using Discord.Rest;
 using Discord.WebSocket;
 using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Services;
 using DiscordBot.scripts.src.party;
+using DiscordBot.scripts.src.Tools;
 using Serilog;
 using ActionType = DiscordBot.scripts.src.party.ActionType;
 
@@ -15,14 +18,16 @@ public class ButtonServices : BaseServices
     private readonly PartyService partyService;
     private readonly GuildService guildService;
     private readonly PartyQueueServices partyQueueServices;
+    private readonly TeamTool teamTool;
     
-    public ButtonServices(DiscordServices services, UserService userService, PartyQueueServices partyQueueServices, PartyService partyService, GuildService guildService) : base(services)
+    public ButtonServices(DiscordServices services, UserService userService, PartyQueueServices partyQueueServices, PartyService partyService, GuildService guildService, TeamTool teamTool) : base(services)
     {
         Services.client.ButtonExecuted += HandleButtonAsync;
         this.userService = userService;
         this.partyService = partyService;
         this.guildService = guildService;
         this.partyQueueServices = partyQueueServices;
+        this.teamTool = teamTool;
     }
     
     private async Task HandleButtonAsync(SocketMessageComponent component)
@@ -72,19 +77,6 @@ public class ButtonServices : BaseServices
         {
             action = parts[0];
             messageIdIndex = 1;
-        }
-        
-        if (action is Constant.TEAM_REMOVE_KEY)
-        {
-            if (messageIdIndex >= parts.Length)
-                return;
-                
-            if (!ulong.TryParse(parts[messageIdIndex], out var key))
-                return;
-
-            var mes = await component.Channel.GetMessageAsync(key);
-            await mes.DeleteAsync();
-            return;
         }
 
         if (messageIdIndex >= parts.Length)
@@ -389,8 +381,32 @@ public class ButtonServices : BaseServices
                 await component.RespondWithModalAsync(teamModal);
                 await component.DeleteOriginalResponseAsync();
                 return;
-            case Constant.PULLING_UP_KEY:
+            
+            case Constant.TEAM_AGAIN_KEY:
+                if (partyClass.IsNone || partyClass.IsWater)
+                {
+                    await component.FollowupAsync("권한이 없어 팀을 새로 돌릴 수 없었습니다.", ephemeral: true);
+                }
                 
+                var teamMessage = await component.ModifyOriginalResponseAsync(m =>
+                {
+                    m.Content = "팀 새로 만들기 중입니다...";
+                });
+                
+                if (int.TryParse(parts[3], out var createCount))
+                {
+                    await teamTool.Random(partyClass, party, teamMessage, parts[2], createCount);
+                }
+                return;
+            case Constant.TEAM_REMOVE_KEY:
+                if (partyClass.IsNone || partyClass.IsWater)
+                {
+                    await component.FollowupAsync("권한이 없어 팀을 삭제할 수 없습니다.", ephemeral: true);
+                }
+                
+                await component.DeleteOriginalResponseAsync();
+                return;
+            case Constant.PULLING_UP_KEY:
                 var channel = component.Channel;
                 var sendMessageAsync = await channel.SendMessageAsync("초기화 중입니다...");
                 
