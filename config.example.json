@@ -1,0 +1,17 @@
+{
+  "Test": {
+    "Enable": false,
+    "UseScheduler": false
+  },
+  "Discord": {
+    "Token": "your token",
+    "TestToken": "test token"
+  },
+  "Database": {
+    "ConnectionString": "Server=localhost;Database=discord_bot;User=root;Password=your_password;",
+    "TestConnectionString": ""
+  },
+  "Debug": {
+    "ViewStackTrace": false
+  }
+}
