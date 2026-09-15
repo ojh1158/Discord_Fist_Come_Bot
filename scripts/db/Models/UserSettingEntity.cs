@@ -29,6 +29,8 @@ public class UserSettingEntity : IDbSetup
     
     public bool JOIN_MY_PARTY_WITH_CREATE_FLAG { get; set; } = false;
 
+    public bool? JOIN_AUTO_MOVE_CHANNEL { get; set; } = null; 
+
     public string ReturnTableName()
     {
         return "USER_CONFIG";
@@ -45,6 +47,7 @@ public class UserSettingEntity : IDbSetup
         columns.Add("PARTY_START_TIME_ALERT_MINUTE", "int default 5 not null");
         columns.Add("JOIN_PARTY_TO_WAIT_FLAG", "tinyint(1) default 1 not null");
         columns.Add("JOIN_MY_PARTY_WITH_CREATE_FLAG", "tinyint(1) default 0 not null");
+        columns.Add("JOIN_AUTO_MOVE_CHANNEL", "tinyint(1) default null");
         columns.Add("UPDATE_DATE", "datetime default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP");
         columns.Add("CREATE_DATE", "datetime default CURRENT_TIMESTAMP null");
     }
