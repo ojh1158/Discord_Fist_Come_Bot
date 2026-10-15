@@ -9,7 +9,7 @@ public class Constant
     
     public const int MAX_NAME_COUNT = 50;
     
-    public const string VERSION = "2.2.4";
+    public const string VERSION = "2.3.0";
 
     public const string JOIN_KEY = "참가";
     public const string LEAVE_KEY = "나가기";

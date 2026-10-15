@@ -51,7 +51,7 @@ public class SlashCommandServices : BaseServices
                     isRequired: true
                 ).AddOption(
                     name: "내정자목록",
-                    type: ApplicationCommandOptionType.String, // 💡 String으로 변경!
+                    type: ApplicationCommandOptionType.String,
                     description: "@멘션으로 내정자들을 연달아 태그해주세요. (예: @홍길동 @임꺽정)",
                     isRequired: false
                 )

@@ -20,11 +20,6 @@ public class PartyQueueServices(
     TaskDelayQueue delayQueue
     ) : ISingleton
 {
-    
-    
-    private static readonly SemaphoreSlim slim1 = new(1, 1);
-    private static readonly SemaphoreSlim slim2 = new(1, 1);
-    
     public async Task<PartyQueueResult> Queue(string partyId, ulong userId, string userNickName, ActionType type, SocketInteraction socketInteraction, bool isMessageUpdate = true)
     {
         var resultType = ActionType.Error;
@@ -43,36 +38,31 @@ public class PartyQueueServices(
             }
         });
         
-        await slim1.WaitAsync();
-
-        try
+        using (await PartyLocks.AcquireAsync($"write_{partyId}"))
         {
-            resultType = type switch
+            try
             {
-                ActionType.Join => await partyService.JoinPartyAsync(partyId, userId, userNickName),
-                ActionType.Leave => await partyService.LeavePartyAsync(partyId, userId),
-                _ => throw new ArgumentOutOfRangeException()
-            };
+                resultType = type switch
+                {
+                    ActionType.Join => await partyService.JoinPartyAsync(partyId, userId, userNickName),
+                    ActionType.Leave => await partyService.LeavePartyAsync(partyId, userId),
+                    _ => throw new ArgumentOutOfRangeException()
+                };
 
-            if (resultType is ActionType.Error or ActionType.PartyNull or ActionType.Exists or ActionType.NoExists)
-            {
-                if (resultType is ActionType.Error or ActionType.PartyNull)
-                    Log.Error($"[{userId}]({userNickName}) {resultType.Comment()}");
+                if (resultType is ActionType.Error or ActionType.PartyNull or ActionType.Exists or ActionType.NoExists)
+                {
+                    if (resultType is ActionType.Error or ActionType.PartyNull)
+                        Log.Error($"[{userId}]({userNickName}) {resultType.Comment()}");
+                }
+
+                afterParty = await partyService.GetPartyEntityAsync(partyId);
             }
-            
-            afterParty = await partyService.GetPartyEntityAsync(partyId);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, $"[{userId}]({userNickName}) {resultType.Comment()}");
-        }
-        finally
-        {
-            slim1.Release();
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"[{userId}]({userNickName}) {resultType.Comment()}");
+            }
         }
         
-        await slim2.WaitAsync();
-
         try
         {
             if (!IsLast)
@@ -81,21 +71,18 @@ public class PartyQueueServices(
 
                 return GetResult();
             }
-            
-            await discordServices.UpdateMessage(socketInteraction, afterParty, useDelay: false);
-            
-            await ResponseUpdateAsync();  
-            
+
+            if (afterParty != null)
+                await discordServices.UpdateMessage(socketInteraction, afterParty, useDelay: false);
+
+            await ResponseUpdateAsync();
+
             return GetResult();
         }
         catch (Exception e)
         {
             Log.Error(e, $"[{userId}]({userNickName}) {resultType.Comment()}");
             return GetResult();
-        }
-        finally
-        {
-            slim2.Release();
         }
 
 #region 지역 함수

@@ -591,9 +591,14 @@ public class ButtonServices : BaseServices
                 break;
                 
         }
-        
-        await Services.UpdateMessage(component, party, isAllMessage, message);
-        await Services.RespondMessageWithExpire(component, isAddSettingButton ? 20 : 10, message: message, addComponent: isAddSettingButton ? Services.GetSettingComponent() : null);
+
+        party = await partyService.GetPartyEntityAsync(partyKey);
+
+        if (party != null)
+        {
+            await Services.UpdateMessage(component, party, isAllMessage, message);
+            await Services.RespondMessageWithExpire(component, isAddSettingButton ? 20 : 10, message: message, addComponent: isAddSettingButton ? Services.GetSettingComponent() : null);
+        }
     }
 
 

@@ -10,6 +10,7 @@ using DiscordBot.scripts.src.party;
 using DiscordBot.scripts.src.util;
 using Serilog;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Emoji = DiscordBot.scripts.src.util.Emoji;
 
 namespace DiscordBot.scripts.src.Services;
@@ -57,79 +58,22 @@ public class DiscordServices : ISingleton
         return Task.CompletedTask;
     }
 
-    public async Task UpdateMessage(SocketInteraction component, PartyEntity? party, bool isAllMessage = false, string message = "", bool useDelay = true)
+    public async Task UpdateMessage(SocketInteraction component, PartyEntity party, bool isAllMessage = false, string message = "", bool useDelay = true)
     {
-        if (party is not null)
-        { 
-            var isUpdate = false;
-            var waitingCount = 0;
-            
-            if (useDelay)
+        try
+        {
+            var scheduler = _services.GetService<PartyRenderScheduler>();
+            if (scheduler == null)
             {
-                isUpdate = await _taskDelayQueue.EnqueueAndWaitAsync(party.PARTY_KEY);
+                Log.Error("[UpdateMessage] PartyRenderScheduler 미등록");
+                return;
             }
-            else
-            {
-                isUpdate = true;
-            }
-            
-            if (!isUpdate) return;
-            
-            var queueState = _taskDelayQueue.GetQueueState(party.PARTY_KEY);
-            if (queueState != null) waitingCount = queueState.WaitingCount;
 
-            var embeds = new Embed[waitingCount > 0 ? 2 : 1];
-            var updatedEmbed = await UpdatedEmbed(party);
-            var updatedComponent = UpdatedComponent(party);
-            embeds[0] = updatedEmbed;
-
-            if (waitingCount > 0)
-            {
-                var embedBuilder = new EmbedBuilder();
-                embedBuilder.WithColor(Color.Red);
-
-                var waitingMessage = $"앞에 {waitingCount}개의 요청을 처리중입니다... {Emoji.Processing}";
-                embedBuilder.WithDescription(waitingMessage);
-                embeds[1] = embedBuilder.Build();
-            }
-            
-            var options = new RequestOptions
-            {
-                Timeout = 60000, // 줄 서는 시간을 고려해 디스코드 내부 타임아웃을 60초로 넉넉하게 확장
-                RetryMode = RetryMode.AlwaysRetry
-            };
-
-
-            var cacheKey = party.MESSAGE_KEY + "_MessageKey";
-            
-            if (!CacheManager.Cache.TryGetValue(cacheKey, out IUserMessage? originalMessage))
-            {
-                // Log.Information($"[{cacheKey}] 메세지 캐시 생성");
-                originalMessage = await component.Channel.GetMessageAsync(party.MESSAGE_KEY, options: options) as IUserMessage;
-                CacheManager.Cache.Set(cacheKey, originalMessage, CacheManager.GetOptions());
-            }
-            
-            if (originalMessage != null)
-            {
-                // 원본 메시지 수정
-                await originalMessage.ModifyAsync(msg =>
-                {
-                    msg.Content = null;
-                    msg.Embeds = embeds;
-                    msg.Components = updatedComponent;
-                }, options);
-
-                // 앞에서 이미 DeferAsync를 했으므로 여기 있던 Defer 조건문은 삭제합니다.
-                if (isAllMessage)
-                {
-                    await originalMessage.ReplyAsync(message, options: options);
-                }
-            }
-            else
-            {
-                await component.Channel.SendMessageAsync($"{party.DISPLAY_NAME} 파티에 대한 원본 메세지를 찾을 수 없습니다. 파티를 해산합니다.", options: options);
-                await _partyService.ExpirePartyAsync(party.MESSAGE_KEY);
-            }
+            await scheduler.RequestAsync(party.PARTY_KEY, isAllMessage, message, immediate: !useDelay);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[UpdateMessage] 스케줄러 요청 실패 party={partyKey}", party.PARTY_KEY);
         }
     }
 
@@ -529,7 +473,7 @@ public class DiscordServices : ISingleton
                         {
                             var ownerSetting = await _userService.GetUserSettingAsync(partyEntity.OWNER_KEY);
                             
-                            if (ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_JOIN_USER_ALERT_FLAG: true })
+                            if (ownerSetting is { ALL_ALERT_FLAG: true, MY_PARTY_LEFT_USER_ALERT_FLAG: true })
                             {
                                 if (await client.GetChannelAsync(partyEntity.CHANNEL_KEY) is SocketGuildChannel guildChannel)
                                 {
