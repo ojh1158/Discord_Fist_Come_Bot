@@ -264,6 +264,34 @@ WHERE PARTY_KEY = @partyKey
         return affectedRows > 0;
     }
 
+    public async Task<bool> ClearStartDate(string partyKey, MySqlConnection connection, MySqlTransaction transaction)
+    {
+        var sql = @"
+UPDATE PARTY
+SET START_DATE = NULL
+WHERE PARTY_KEY = @partyKey
+    ";
+        var affectedRows = await connection.ExecuteAsync(sql,
+            new { partyKey },
+            transaction: transaction);
+
+        return affectedRows > 0;
+    }
+
+    public async Task<bool> ClearExpireDate(string partyKey, MySqlConnection connection, MySqlTransaction transaction)
+    {
+        var sql = @"
+UPDATE PARTY
+SET EXPIRE_DATE = NULL
+WHERE PARTY_KEY = @partyKey
+    ";
+        var affectedRows = await connection.ExecuteAsync(sql,
+            new { partyKey },
+            transaction: transaction);
+
+        return affectedRows > 0;
+    }
+
     public async Task GetPartyLock(string partyKey, MySqlConnection connection, MySqlTransaction transaction)
     {
         var sql = @"

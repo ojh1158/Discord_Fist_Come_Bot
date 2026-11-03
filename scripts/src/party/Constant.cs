@@ -9,7 +9,7 @@ public class Constant
     
     public const int MAX_NAME_COUNT = 50;
     
-    public const string VERSION = "2.3.0";
+    public const string VERSION = "2.3.1";
 
     public const string JOIN_KEY = "참가";
     public const string LEAVE_KEY = "나가기";
@@ -35,18 +35,18 @@ public class Constant
     public const string TEAM_REMOVE_KEY = "팀 삭제";
     public const string TEAM_AGAIN_KEY = "팀 다시 만들기";
 
-    public const string DATE_PICKUP_KEY = "날짜 선택기";
-    public const string DATE_PICKUP_FIRST_KEY = "처음 날짜 선택 시";
+    public const string DATE_INPUT_HELP = "예: 오늘 18시 / 내일 20시 / 모레 19시반 / 금 20시 / 11/5 20:00 / 2026-01-01 23:00 / 20:00 / 3시간 후 / 30분 후 (삭제: 없음)";
+    public const string DATE_INPUT_PLACEHOLDER = "오늘 20시 / 내일 20시 / 모레 19시반 / 금 20시 / 11/5 20:00 / 3시간 후 / 삭제: 없음";
+    public const string DATE_INPUT_EXAMPLES = "입력 예시\n• 오늘 18시 / 내일 20시 / 모레 19시반\n• 금 20시 / 11/5 20:00 / 2026-01-01 23:00\n• 20:00 / 3시간 후 / 30분 후\n• 시간 삭제: 없음 또는 빈칸 제출";
+    public const string DATE_MODAL_KEY = "시간입력";
+    public const string DATE_CREATE_KEY = "파티생성";
+    public const string DATE_INPUT_FIELD_EXPIRE = "datetime_expire";
+    public const string TIME_SETTING_KEY = "시간 설정";
+    public const string DATE_MODAL_BOTH = "전체";
+    public const string DATE_CREATE_EXAMPLES = "입력 예시\n• 오늘 18시 / 내일 20시 / 모레 19시반\n• 금 20시 / 11/5 20:00 / 2026-01-01 23:00\n• 20:00 / 3시간 후 / 30분 후\n• 비워두면 시간 없이 생성 (만료: 2일 후 23:59 자동)";
+    public const string DATE_INPUT_FIELD = "datetime";
 
-    public const string YEAR_KEY = "년";
-    public const string MONTH_KEY = "월";
-    public const string DAY_TENS_KEY = "일10"; // 십의 자리
-    public const string DAY_ONES_KEY = "일1";  // 일의 자리
-    public const string HOUR_KEY = "시";
-    public const string MIN_TENS_KEY = "분10"; // 십의 자리
-    public const string MIN_ONES_KEY = "분1";  // 일의 자리
-    public const string DATE_YEAR_SELECT_KEY = "년.월.일 선택";
-    public const string DATE_HOUR_SELECT_KEY = "시.분 선택";
+
 
     public const string USER_ALERT_SETTING_KEY = "개인 알람 설정";
 
@@ -60,8 +60,7 @@ public class Constant
     public const string PARTY_START_TIME_ALERT_FLAG = "파티 시간 5분전 알림";
     
     
-    public const string DATE_YES = "확인";
-    public const string DATE_NO = "취소";
+
         
     
     public const string YES_BUTTON_KEY = "yes";

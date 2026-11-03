@@ -7,6 +7,7 @@ using DiscordBot.scripts.db.Models;
 using DiscordBot.scripts.db.Services;
 using DiscordBot.scripts.src.party;
 using DiscordBot.scripts.src.Tools;
+using DiscordBot.scripts.src.util;
 using Serilog;
 using ActionType = DiscordBot.scripts.src.party.ActionType;
 
@@ -102,7 +103,7 @@ public class ButtonServices : BaseServices
         }
 
         ActionType type;
-        
+
         switch (action)
         {
             case Constant.JOIN_KEY:
@@ -161,8 +162,7 @@ public class ButtonServices : BaseServices
                 {
                     componentBuilder.WithButton(Constant.JOIN_AUTO_KEY, $"{Constant.JOIN_AUTO_KEY}_{partyKey}", ButtonStyle.Primary, row:2);
                     componentBuilder.WithButton(Constant.PARTY_KEY,$"{Constant.PARTY_KEY}_{partyKey}", ButtonStyle.Primary, row:2);
-                    componentBuilder.WithButton(Constant.START_TIME_OPEN_KEY,$"{Constant.START_TIME_OPEN_KEY}_{partyKey}", ButtonStyle.Primary, row:2);
-                    componentBuilder.WithButton(Constant.EXPIRE_TIME_OPEN_KEY,$"{Constant.EXPIRE_TIME_OPEN_KEY}_{partyKey}", ButtonStyle.Primary, row:2);
+                    componentBuilder.WithButton(Constant.TIME_SETTING_KEY,$"{Constant.TIME_SETTING_KEY}_{partyKey}", ButtonStyle.Primary, row:2);
                     
                     componentBuilder.WithButton(Constant.MOVE_OWNER_KEY, $"{Constant.MOVE_OWNER_KEY}_{partyKey}", ButtonStyle.Primary, row:3);
                     componentBuilder.WithButton(party.IS_CLOSED ? "재개" : Constant.CLOSE_KEY, $"{Constant.CLOSE_KEY}_{partyKey}", party.IS_CLOSED ? ButtonStyle.Success : ButtonStyle.Danger, row:3);
@@ -370,10 +370,10 @@ public class ButtonServices : BaseServices
                 var teamModal = new ModalBuilder()
                     .WithTitle("팀 만들기")
                     .WithCustomId($"{Constant.TEAM_KEY}_{partyKey}")
-                    .AddTextInput("팀 갯수", "count", TextInputStyle.Short, 
-                        placeholder: $"{1}-{maxCount}", 
+                    .AddTextInput("팀 갯수", "count", TextInputStyle.Short,
+                        placeholder: $"{1}-{maxCount}",
                         required: true,
-                        value: "",
+                        value: null,
                         minLength: 0,
                         maxLength: 10)
                     .Build();
@@ -464,111 +464,28 @@ public class ButtonServices : BaseServices
                 });
                 _ = Services.RespondMessageWithExpire(component);
                 return;
-            case Constant.START_TIME_OPEN_KEY or Constant.EXPIRE_TIME_OPEN_KEY:
-                
-                var time = Constant.START_TIME_OPEN_KEY == action ? party.START_DATE : party.EXPIRE_DATE;
-                
-                var messageProperties = Services.CreateDatePickup(action, party, time);
+            case Constant.TIME_SETTING_KEY:
+                var startPrefill = party.START_DATE ?? DateTime.Now.AddHours(1);
+                var timeModal = new ModalBuilder()
+                    .WithTitle(action)
+                    .WithCustomId($"{Constant.DATE_MODAL_KEY}_{partyKey}_{Constant.DATE_MODAL_BOTH}")
+                    .AddTextDisplay(Constant.DATE_INPUT_EXAMPLES)
+                    .AddTextInput("시작 날짜/시간", Constant.DATE_INPUT_FIELD, TextInputStyle.Short,
+                        placeholder: Constant.DATE_INPUT_PLACEHOLDER,
+                        required: false,
+                        value: startPrefill.ToNaturalInput(),
+                        minLength: 0,
+                        maxLength: 100)
+                    .AddTextInput("만료 날짜/시간 (비워두면 없음)", Constant.DATE_INPUT_FIELD_EXPIRE, TextInputStyle.Short,
+                        placeholder: Constant.DATE_INPUT_PLACEHOLDER,
+                        required: false,
+                        value: party.EXPIRE_DATE.HasValue ? party.EXPIRE_DATE.Value.ToNaturalInput() : null,
+                        minLength: 0,
+                        maxLength: 100)
+                    .Build();
 
-                await component.ModifyOriginalResponseAsync(mp =>
-                {
-                    mp.Content = messageProperties.Content;
-                    mp.Embed = messageProperties.Embed;
-                    mp.Components = messageProperties.Components;
-                });
-                
+                await component.RespondWithModalAsync(timeModal);
                 return;
-            case Constant.DATE_PICKUP_KEY or Constant.DATE_PICKUP_FIRST_KEY:
-                var guid = parts[2];
-                var title = parts[3];
-                var dateAction = parts[4];
-                
-                if (!Services.dateDic.TryGetValue(guid, out var date))
-                {
-                    await component.ModifyOriginalResponseAsync(mp =>
-                    {
-                        mp.Content = "데이터 처리 중 오류가 발생하였습니다, 다시 시도해주세요";
-                        mp.Components = null;
-                        mp.Embed = null;
-                    });
-                    return;
-                }
-
-                switch (dateAction)
-                {
-                    case Constant.DATE_YEAR_SELECT_KEY or Constant.DATE_HOUR_SELECT_KEY:
-                        date.IsDateDisplay = dateAction == Constant.DATE_YEAR_SELECT_KEY;
-                        
-                        var datePickup = Services.CreateDatePickup(title, partyEntity!, guid: guid);
-            
-                        await component.ModifyOriginalResponseAsync(mp =>
-                        {
-                            mp.Content = datePickup.Content;
-                            mp.Embed = datePickup.Embed;
-                            mp.Components = datePickup.Components;
-                        });       
-                        return;
-                    
-                    case Constant.DATE_YES:
-                        var dateTime = date.ToDateTime();
-                        
-                        switch (title)
-                        {
-                            case Constant.START_TIME_OPEN_KEY:
-                                if (await partyService.SetStartDate(party.PARTY_KEY, dateTime))
-                                {
-                                    message = "시작 날짜를 설정하였습니다.";
-                                    party.START_DATE = dateTime;
-                                }
-                                else
-                                {
-                                    message = "날짜 설정에 실패하였습니다.";
-                                }
-                                break;
-                            case Constant.EXPIRE_TIME_OPEN_KEY:
-                                if (await partyService.SetExpireDate(party.PARTY_KEY, dateTime))
-                                {
-                                    message = "만료 날짜를 설정하였습니다.";
-                                    party.EXPIRE_DATE = dateTime;
-                                }
-                                else
-                                {
-                                    message = "날짜 설정에 실패하였습니다.";
-                                }
-                                break;
-                        }
-                        
-                        await component.ModifyOriginalResponseAsync(mp =>
-                        {
-                            mp.Content = message;
-                            mp.Embed = null;
-                            mp.Components = null;
-                        });       
-                        
-                        break;
-                    case Constant.DATE_NO:
-                        // if (action == PartyConstant.DATE_PICKUP_FIRST_KEY)
-                        // {
-                        //     await component.ModifyOriginalResponseAsync(mp =>
-                        //     {
-                        //         mp.Content = "설정을 취소하였습니다.";
-                        //         mp.Embed = null;
-                        //         mp.Components = null;
-                        //     });
-                        // }
-                        
-                        await component.ModifyOriginalResponseAsync(mp =>
-                        {
-                            mp.Content = "설정을 취소하였습니다.";
-                            mp.Embed = null;
-                            mp.Components = null;
-                        });
-                        
-                        message = "설정을 취소하였습니다.";
-                        break;
-                }
-                break;
-                
                 case Constant.MOVE_OWNER_KEY:
                 selectMenuBuilder = new SelectMenuBuilder()
                     .WithCustomId($"{Constant.MOVE_OWNER_KEY}_{partyKey}")

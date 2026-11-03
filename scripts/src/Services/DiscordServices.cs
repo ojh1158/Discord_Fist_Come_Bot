@@ -222,16 +222,11 @@ public class DiscordServices : ISingleton
 
         var title = $"**{party.DISPLAY_NAME}** {state}";
 
-        var stateDate = party.START_DATE.HasValue ? new DatePickerState().FromDateTime(party.START_DATE.Value) : null;
-        var expireDate = party.EXPIRE_DATE.HasValue
-            ? new DatePickerState().FromDateTime(party.EXPIRE_DATE.Value)
-            : null;
-
         var description = "";
-        
-        if (party.START_DATE.HasValue && stateDate != null)
+
+        if (party.START_DATE.HasValue)
         {
-            description += $"**시작시간: {party.START_DATE?.ToDiscordRelativeTimestamp()} ({stateDate.ToDisplayString()}) **\n";
+            description += $"**시작시간: {party.START_DATE?.ToDiscordRelativeTimestamp()} ({party.START_DATE.Value.ToKoreanDisplayString()}) **\n";
         }
         if (party.VOICE_CHANNEL_KEY != null)
         {
@@ -259,9 +254,9 @@ public class DiscordServices : ISingleton
 
         // 만료시간 추가 (강조 표시)
 
-        if (expireDate != null)
+        if (party.EXPIRE_DATE.HasValue)
         {
-            description += $"\n\n\n**만료시간: {party.EXPIRE_DATE?.ToDiscordRelativeTimestamp()} ({expireDate.ToDisplayString()})**";
+            description += $"\n\n\n**만료시간: {party.EXPIRE_DATE?.ToDiscordRelativeTimestamp()} ({party.EXPIRE_DATE.Value.ToKoreanDisplayString()})**";
         }
         else
         {
@@ -531,241 +526,5 @@ public class DiscordServices : ISingleton
         return $"\n(<#{channelId}>)[{DateTime.Now.ToDiscordRelativeTimestamp()}]\n\\\u200B";
     }
 
-    public Dictionary<string, DatePickerState> dateDic = new();
-    
-    public MessageProperties CreateDatePickup(string title, PartyEntity party, DateTime? time = null, string? guid = null, bool isFirst = false)
-    {
-        dateDic.TryGetValue(guid ?? "", out var datePickerState);
-        
-        var componentBuilder = new ComponentBuilder();
-        var embedBuilder = new EmbedBuilder();
-        
-        var state = datePickerState ?? new DatePickerState();
-
-        if (time.HasValue)
-        {
-            state.FromDateTime(time.Value);
-        }
-        else if (!time.HasValue && datePickerState is null)
-        {
-            var t = DateTime.Now.AddHours(1);
-            state.FromDateTime(t.Date.AddHours(t.Hour));
-        }
-        var stateId = state.Id;
-        var key = stateId.ToString();
-
-        embedBuilder.WithTitle($"{title}");
-        embedBuilder.WithDescription($"{state.ToDisplayString()} {state.ToDateTime().ToDiscordRelativeTimestamp()}");
-        embedBuilder.WithColor(Color.Blue);
-
-        var dataPickup = $"{(isFirst ? Constant.DATE_PICKUP_FIRST_KEY : Constant.DATE_PICKUP_KEY)}_{party.PARTY_KEY}_{key}_{title}";
-
-        if (state.IsDateDisplay)
-        {
-            // Row 0: 년
-            componentBuilder.WithSelectMenu($"{dataPickup}_{Constant.YEAR_KEY}", GetYearOptions(state.Year), "년도");
-            // Row 1: 월
-            componentBuilder.WithSelectMenu($"{dataPickup}_{Constant.MONTH_KEY}", GetMonthOptions(state.Month), "월");
-            // Row 2: 일
-            componentBuilder.WithSelectMenu($"{dataPickup}_{Constant.DAY_TENS_KEY}", GetDayTensOptions(state.DayTens), "일 (10단위)");
-            componentBuilder.WithSelectMenu($"{dataPickup}_{Constant.DAY_ONES_KEY}", GetDayOnesOptions(state.DayOnes), "일 (1단위)");
-        }
-        else
-        {
-            // Row 3: 시
-            componentBuilder.WithSelectMenu($"{dataPickup}_{Constant.HOUR_KEY}", GetHourOptions(state.Hour), "시");
-            
-            // Row 4: 분
-            componentBuilder.WithSelectMenu($"{dataPickup}_{Constant.MIN_TENS_KEY}", GetMinTensOptions(state.MinTens), "분 (10단위)");
-            componentBuilder.WithSelectMenu($"{dataPickup}_{Constant.MIN_ONES_KEY}", GetMinOnesOptions(state.MinOnes), "분 (1단위)");
-        }
-
-        if (state.IsDateDisplay)
-            componentBuilder.WithButton(Constant.DATE_HOUR_SELECT_KEY,
-                $"{dataPickup}_{Constant.DATE_HOUR_SELECT_KEY}");
-        else
-            componentBuilder.WithButton(Constant.DATE_YEAR_SELECT_KEY,
-                $"{dataPickup}_{Constant.DATE_YEAR_SELECT_KEY}");
-
-        // Row 5: 확인/취소 버튼 (SelectMenu가 4개를 차지했으므로 마지막은 버튼)
-        componentBuilder.WithButton(Constant.DATE_YES, $"{dataPickup}_{Constant.DATE_YES}", ButtonStyle.Success, row: 4);
-        componentBuilder.WithButton(Constant.DATE_NO, $"{dataPickup}_{Constant.DATE_NO}", ButtonStyle.Danger, row: 4);
-
-        dateDic.TryAdd(key, state);
-        
-        return new MessageProperties
-        {
-            Content = "",
-            Components = componentBuilder.Build(),
-            Embed = embedBuilder.Build()
-        };
-    }
-    
-    // 년도: 현재 기준 -1년부터 +5년 정도가 적당합니다.
-    private List<SelectMenuOptionBuilder> GetYearOptions(int current)
-    {
-        var options = new List<SelectMenuOptionBuilder>();
-        int startYear = DateTime.Now.Year;
-        for (int i = startYear; i < startYear + 10; i++) // 향후 10년
-        {
-            options.Add(new SelectMenuOptionBuilder()
-                .WithLabel($"{i}년")
-                .WithValue(i.ToString())
-                .WithDefault(i == current)
-            );
-        }
-        return options;
-    }
-
-    // 월: 1~12월
-    private List<SelectMenuOptionBuilder> GetMonthOptions(int current)
-    {
-        var options = new List<SelectMenuOptionBuilder>();
-        for (int i = 1; i <= 12; i++)
-        {
-            options.Add(new SelectMenuOptionBuilder()
-                .WithLabel($"{i}월")
-                .WithValue(i.ToString())
-                .WithDefault(i == current));
-        }
-        return options;
-    }
-
-    // 시간: 0~23시
-    private List<SelectMenuOptionBuilder> GetHourOptions(int current)
-    {
-        var options = new List<SelectMenuOptionBuilder>();
-        for (int i = 0; i <= 23; i++)
-        {
-            options.Add(new SelectMenuOptionBuilder()
-                .WithLabel($"{i:D2}시") // 01시, 02시 형태
-                .WithValue(i.ToString())
-                .WithDefault(i == current));
-        }
-        return options;
-    }
-
-    // --- '일(Day)' 조립용 ---
-    private List<SelectMenuOptionBuilder> GetDayTensOptions(int current)
-    {
-        var options = new List<SelectMenuOptionBuilder>();
-        int currentTens = (current / 10) * 10;
-        for (int i = 0; i <= 30; i += 10)
-        {
-            options.Add(new SelectMenuOptionBuilder()
-                .WithLabel($"({i.ToString()[0]}N)일")
-                .WithValue(i.ToString())
-                .WithDefault(i == currentTens));
-        }
-        return options;
-    }
-
-    private List<SelectMenuOptionBuilder> GetDayOnesOptions(int current)
-    {
-        var options = new List<SelectMenuOptionBuilder>();
-        int currentOnes = current % 10;
-        for (int i = 0; i <= 9; i++)
-        {
-            options.Add(new SelectMenuOptionBuilder()
-                .WithLabel($"(N{i})일")
-                .WithValue(i.ToString())
-                .WithDefault(i == currentOnes));
-        }
-        return options;
-    }
-
-    // --- '분(Minute)' 조립용 (동일 로직) ---
-    private List<SelectMenuOptionBuilder> GetMinTensOptions(int current)
-    {
-        var options = new List<SelectMenuOptionBuilder>();
-        int currentTens = (current / 10) * 10;
-        for (int i = 0; i <= 50; i += 10)
-        {
-            options.Add(new SelectMenuOptionBuilder().WithLabel($"({i.ToString()[0]}N)분").WithValue(i.ToString()).WithDefault(i == currentTens));
-        }
-        return options;
-    }
-
-    private List<SelectMenuOptionBuilder> GetMinOnesOptions(int current)
-    {
-        var options = new List<SelectMenuOptionBuilder>();
-        for (int i = 0; i <= 9; i++)
-        {
-            options.Add(new SelectMenuOptionBuilder().WithLabel($"(N{i})분").WithValue(i.ToString()).WithDefault(i == (current % 10)));
-        }
-        return options;
-    }
 }
 
-public class DatePickerState
-{
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public int Year { get; set; } = DateTime.Now.Year;
-    public int Month { get; set; } = DateTime.Now.Month;
-    
-    // 조립형 '일' (Day) - 현재 날짜 기준 자동 분리
-    public int DayTens { get; set; } = (DateTime.Now.Day / 10) * 10;
-    public int DayOnes { get; set; } = DateTime.Now.Day % 10;
-    public int FullDay => DayTens + DayOnes;
-
-    public int Hour { get; set; } = DateTime.Now.Hour;
-
-    // 조립형 '분' (Minute) - 현재 분 기준 자동 분리
-    public int MinTens { get; set; } = (DateTime.Now.Minute / 10) * 10;
-    public int MinOnes { get; set; } = 0;
-    public int FullMinute => MinTens + MinOnes;
-    
-    public bool IsDateDisplay { get; set; } = false;
-    
-
-    // 상단 표시용 문자열
-    public string ToDisplayString()
-    {
-        var now = DateTime.Now;
-        var result = "";
-
-        if (now.Year != Year)
-        {
-            result += $"{Year}년 {Month}월 ";
-        }
-        else if (now.Month != Month)
-        {
-            result += $"{Month}월 ";
-        }
-
-        result += $"{FullDay}일 {Hour}시 {FullMinute}분";
-
-        return result;
-    }
-
-    public DateTime ToDateTime()
-    {
-        try
-        {
-            // 1. 기본적으로 사용자가 선택한 값으로 생성 시도
-            return new DateTime(Year, Month, FullDay, Hour, FullMinute, 0);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            // 2. 만약 2월 31일 처럼 말도 안 되는 날짜면, 해당 월의 마지막 날로 보정
-            int lastDay = DateTime.DaysInMonth(Year, Month);
-            return new DateTime(Year, Month, lastDay, Hour, FullMinute, 0);
-        }
-    }
-
-    /// <summary>DateTime을 받아 이 인스턴스의 년/월/일/시/분 필드를 채웁니다 (ToDateTime의 역연산).</summary>
-    public DatePickerState FromDateTime(DateTime dateTime)
-    {
-        Year = dateTime.Year;
-        Month = dateTime.Month;
-        int day = dateTime.Day;
-        DayTens = (day / 10) * 10;
-        DayOnes = day % 10;
-        Hour = dateTime.Hour;
-        int minute = dateTime.Minute;
-        MinTens = (minute / 10) * 10;
-        MinOnes = minute % 10;
-
-        return this;
-    }
-}

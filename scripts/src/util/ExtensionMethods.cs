@@ -23,4 +23,39 @@ public static class ExtensionMethods
     {
         return $"<t:{dateTime.ToUtcUnixTimeSeconds()}:R>";
     }
+
+    // 4. 파티 만료 기본값: 생성일 +2일 23:59
+    public static DateTime DefaultExpireDate() =>
+        DateTime.Now.Date.AddDays(2).AddHours(23).AddMinutes(59);
+
+    // 5. 자연어 입력용 한글 날짜 표시 (모달 기본값용)
+    public static string ToNaturalInput(this DateTime dateTime)
+    {
+        var today = DateTime.Now.Date;
+        var day = dateTime.Date == today ? "오늘"
+            : dateTime.Date == today.AddDays(1) ? "내일"
+            : dateTime.Date == today.AddDays(2) ? "모레"
+            : dateTime.ToString("yyyy-MM-dd");
+        return dateTime.Minute == 0 ? $"{day} {dateTime.Hour}시" : $"{day} {dateTime.Hour}시 {dateTime.Minute}분";
+    }
+
+    // 6. 파티 임베드용 한글 날짜 표시 (구 DatePickerState.ToDisplayString과 동일)
+    public static string ToKoreanDisplayString(this DateTime dateTime)
+    {
+        var now = DateTime.Now;
+        var result = "";
+
+        if (now.Year != dateTime.Year)
+        {
+            result += $"{dateTime.Year}년 {dateTime.Month}월 ";
+        }
+        else if (now.Month != dateTime.Month)
+        {
+            result += $"{dateTime.Month}월 ";
+        }
+
+        result += $"{dateTime.Day}일 {dateTime.Hour}시 {dateTime.Minute}분";
+
+        return result;
+    }
 }

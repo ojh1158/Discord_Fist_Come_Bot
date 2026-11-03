@@ -13,7 +13,7 @@ public class BaseServices(DiscordServices services) : ISingleton
     {
         switch (action)
         {
-            case Constant.PARTY_KEY or Constant.TEAM_KEY:
+            case Constant.PARTY_KEY or Constant.TEAM_KEY or Constant.START_TIME_OPEN_KEY or Constant.EXPIRE_TIME_OPEN_KEY or Constant.TIME_SETTING_KEY:
                 break;
             default:
                 if (!component.HasResponded && action is
@@ -34,11 +34,12 @@ public class BaseServices(DiscordServices services) : ISingleton
                                 });
                                 break;
                             case SocketModal submitModal:
-                                await submitModal.UpdateAsync(msg =>
-                                {
-                                    msg.Content = warkText;
-                                    msg.Components = null;
-                                });
+                                // 모달 제출에는 UpdateAsync(컴포넌트용)가 아닌 DeferAsync를 사용해야
+                                // Unknown Webhook(10015) 없이 후속 ModifyOriginalResponseAsync가 동작한다.
+                                if (!submitModal.HasResponded)
+                                    await submitModal.DeferAsync(ephemeral: true);
+                                else
+                                    await submitModal.ModifyOriginalResponseAsync(msg => msg.Content = warkText);
                                 break;
                         }
                     }

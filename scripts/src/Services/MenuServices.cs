@@ -307,53 +307,7 @@ public class MenuServices : BaseServices
                 }
 
                 break;
-            case Constant.DATE_PICKUP_KEY or Constant.DATE_PICKUP_FIRST_KEY:
-                var guid = parts[2];
-                var title = parts[3];
-                var dateAction = parts[4];
-                var s = selectedValues.First();
-                
-                if (s == null || !Services.dateDic.TryGetValue(guid, out var date))
-                {
-                    allmessage = "데이터 처리 중 오류가 발생하였습니다, 다시 시도해주세요";
-                    break;
-                }
-                
-                switch (dateAction)
-                {
-                    case Constant.YEAR_KEY:
-                        date.Year = int.Parse(s);  // 2025
-                        break;
-                    case Constant.MONTH_KEY:
-                        date.Month = int.Parse(s);  // 1~12
-                        break;
-                    case Constant.DAY_TENS_KEY:
-                        date.DayTens = int.Parse(s);  // 0, 10, 20, 30
-                        break;
-                    case Constant.DAY_ONES_KEY:
-                        date.DayOnes = int.Parse(s);  // 0~9
-                        break;
-                    case Constant.HOUR_KEY:
-                        date.Hour = int.Parse(s);  // 0~23
-                        break;
-                    case Constant.MIN_TENS_KEY:
-                        date.MinTens = int.Parse(s);  // 0, 10, ..., 50
-                        break;
-                    case Constant.MIN_ONES_KEY:
-                        date.MinOnes = int.Parse(s);  // 0~9
-                        break;
-                }
-                
-                var datePickup = Services.CreateDatePickup(title, partyEntity, guid: guid);
-            
-                await component.ModifyOriginalResponseAsync(mp =>
-                {
-                    mp.Content = datePickup.Content;
-                    mp.Embed = datePickup.Embed;
-                    mp.Components = datePickup.Components;
-                });
-                
-                return;
+
         }
         
         var party = await partyService.GetPartyEntityAsync(partyKey);

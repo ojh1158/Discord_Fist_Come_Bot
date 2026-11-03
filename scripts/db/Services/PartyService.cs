@@ -199,6 +199,24 @@ public class PartyService(DatabaseController databaseController, UserRepository 
         });
     }
     
+    public Task<bool> ClearStartDate(string partyKey)
+    {
+        return databaseController.ExecuteInTransactionAsync(async (conn, trans) =>
+        {
+            await userRepository.RemoveAlertParty(partyKey, conn, trans);
+
+            return await partyRepository.ClearStartDate(partyKey, conn, trans);
+        });
+    }
+
+    public Task<bool> ClearExpireDate(string partyKey)
+    {
+        return databaseController.ExecuteInTransactionAsync(async (conn, trans) =>
+        {
+            return await partyRepository.ClearExpireDate(partyKey, conn, trans);
+        });
+    }
+
     public Task<bool> SetExpireDate(string partyKey, DateTime dateTime)
     {
         return databaseController.ExecuteInTransactionAsync(async (conn, trans) =>

@@ -57,7 +57,6 @@
   |---|---|---|---|
   | `이름` | String (1~50자) | O | 파티 이름 |
   | `인원` | Integer (1~100) | O | 모집 인원 (`Constant.MIN_COUNT`~`MAX_COUNT`) |
-  | `시작시간설정` | Boolean | O | `true` 시 날짜 선택기 표시, 임시 메시지 300초 후 만료 |
   | `내정자목록` | String | X | `@멘션` 나열 (예: `@홍길동 @임꺽정`), 명령어 실행자 자동 포함, Bot 제외 |
   | `채널선택` | Channel(Voice) | X | 파티가 모일 음성 채널 멘션 |
   - 권한 체크: `ViewChannel`, `SendMessages`, `ReadMessageHistory` 없으면 에페메랄 오류 메시지
