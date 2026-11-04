@@ -138,7 +138,7 @@ public class DiscordServices : ISingleton
         });
     }
 
-    public async Task RespondMessageWithExpire(SocketInteraction component, int time = 10, string? message = null,
+    public async Task RespondMessageWithExpire(SocketInteraction component, int time = 30, string? message = null,
         MessageComponent? addComponent = null)
     {
         var separator = "\u200B"; // Zero-Width Space

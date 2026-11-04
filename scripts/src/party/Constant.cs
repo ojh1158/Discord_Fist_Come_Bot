@@ -9,7 +9,10 @@ public class Constant
     
     public const int MAX_NAME_COUNT = 50;
     
-    public const string VERSION = "2.3.2";
+    public const string VERSION = "2.3.3";
+
+    public const string TIME_RETRY_KEY = "시간재시도";
+    public const string TIME_CLOSE_KEY = "시간종료";
 
     public const string JOIN_KEY = "참가";
     public const string LEAVE_KEY = "나가기";
@@ -37,13 +40,13 @@ public class Constant
 
     public const string DATE_INPUT_HELP = "예: 오늘 18시 / 내일 20시 / 모레 19시반 / 금 20시 / 11/5 20:00 / 2026-01-01 23:00 / 20:00 / 3시간 후 / 30분 후 (삭제: 없음)";
     public const string DATE_INPUT_PLACEHOLDER = "오늘 20시 / 내일 20시 / 모레 19시반 / 금 20시 / 11/5 20:00 / 3시간 후 / 22.5 / 삭제: 없음";
-    public const string DATE_INPUT_EXAMPLES = "입력 예시\n• 오늘 18시 / 내일 20시 / 모레 19시반\n• 금 20시 / 11/5 20:00 / 2026-01-01 23:00\n• 20:00 / 3시간 후 / 30분 후 / 22.5\n• 시간 삭제: 없음 또는 빈칸 제출";
+    public const string DATE_INPUT_EXAMPLES = "입력 예시\n• 오늘 18시 / 내일 20시 / 모레 19시반\n• 금 20시 / 11/5 20:00 / 2026-01-01 23:00\n• 20:00 / 3시간 후 / 30분 후 / 22.5 / 23\n• 시간 삭제: 없음 또는 빈칸 제출";
     public const string DATE_MODAL_KEY = "시간입력";
     public const string DATE_CREATE_KEY = "파티생성";
     public const string DATE_INPUT_FIELD_EXPIRE = "datetime_expire";
     public const string TIME_SETTING_KEY = "시간 설정";
     public const string DATE_MODAL_BOTH = "전체";
-    public const string DATE_CREATE_EXAMPLES = "입력 예시\n• 오늘 18시 / 내일 20시 / 모레 19시반\n• 금 20시 / 11/5 20:00 / 2026-01-01 23:00\n• 20:00 / 3시간 후 / 30분 후 / 22.5\n• 비워두면 시간 없이 생성 (만료: 2일 후 23:59 자동)";
+    public const string DATE_CREATE_EXAMPLES = "입력 예시\n• 오늘 18시 / 내일 20시 / 모레 19시반\n• 금 20시 / 11/5 20:00 / 2026-01-01 23:00\n• 20:00 / 3시간 후 / 30분 후 / 22.5 / 23\n• 비워두면 시간 없이 생성 (만료: 2일 후 23:59 자동)";
     public const string DATE_INPUT_FIELD = "datetime";
 
 

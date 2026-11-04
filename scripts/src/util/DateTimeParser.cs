@@ -6,7 +6,7 @@ namespace DiscordBot.scripts.src.util;
 /// <summary>모달 자유입력용 한국어 시간 파서 (KST, DateTime.Now 기준).</summary>
 public static class DateTimeParser
 {
-    public const string HelpText = "예: 2026-01-01 23:00 / 11/5 20:00 / 내일 20시 / 모레 19시반 / 금 20시 / 3시간 후 / 22.5=22시30분 (삭제: 없음)";
+    public const string HelpText = "예: 2026-01-01 23:00 / 11/5 20:00 / 내일 20시 / 모레 19시반 / 금 20시 / 3시간 후 / 22.5=22시30분 / 23=23시 (삭제: 없음)";
 
     private static readonly string[] ClearWords =
         ["없음", "미정", "삭제", "지움", "지우기", "제거", "취소", "해제", "-", "x", "X"];
@@ -261,6 +261,18 @@ public static class DateTimeParser
                 error = "시간이 올바르지 않습니다 (0~23시, 0~59분).";
                 return false;
             }
+            hasTime = true;
+        }
+        else if (!hasTime && Regex.IsMatch(rest, @"^\d{1,2}$"))
+        {
+            // 숫자만: 23 → 23시 정각 (오늘, 지났으면 내일 / 오늘·날짜 지정과도 조합 가능)
+            hour = int.Parse(rest);
+            if (hour > 23)
+            {
+                error = "시간이 올바르지 않습니다 (0~23시).";
+                return false;
+            }
+            minute = 0;
             hasTime = true;
         }
         else if (!hasTime)

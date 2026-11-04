@@ -13,7 +13,7 @@ public class BaseServices(DiscordServices services) : ISingleton
     {
         switch (action)
         {
-            case Constant.PARTY_KEY or Constant.TEAM_KEY or Constant.START_TIME_OPEN_KEY or Constant.EXPIRE_TIME_OPEN_KEY or Constant.TIME_SETTING_KEY:
+            case Constant.PARTY_KEY or Constant.TEAM_KEY or Constant.START_TIME_OPEN_KEY or Constant.EXPIRE_TIME_OPEN_KEY or Constant.TIME_SETTING_KEY or Constant.TIME_RETRY_KEY:
                 break;
             default:
                 if (!component.HasResponded && action is

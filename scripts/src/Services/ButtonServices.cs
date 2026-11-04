@@ -465,26 +465,16 @@ public class ButtonServices : BaseServices
                 _ = Services.RespondMessageWithExpire(component);
                 return;
             case Constant.TIME_SETTING_KEY:
-                var startPrefill = party.START_DATE ?? DateTime.Now.AddHours(1);
-                var timeModal = new ModalBuilder()
-                    .WithTitle(action)
-                    .WithCustomId($"{Constant.DATE_MODAL_KEY}_{partyKey}_{Constant.DATE_MODAL_BOTH}")
-                    .AddTextDisplay(Constant.DATE_INPUT_EXAMPLES)
-                    .AddTextInput("시작 날짜/시간", Constant.DATE_INPUT_FIELD, TextInputStyle.Short,
-                        placeholder: Constant.DATE_INPUT_PLACEHOLDER,
-                        required: false,
-                        value: startPrefill.ToNaturalInput(),
-                        minLength: 0,
-                        maxLength: 100)
-                    .AddTextInput("만료 날짜/시간 (비워두면 없음)", Constant.DATE_INPUT_FIELD_EXPIRE, TextInputStyle.Short,
-                        placeholder: Constant.DATE_INPUT_PLACEHOLDER,
-                        required: false,
-                        value: party.EXPIRE_DATE.HasValue ? party.EXPIRE_DATE.Value.ToNaturalInput() : null,
-                        minLength: 0,
-                        maxLength: 100)
-                    .Build();
-
-                await component.RespondWithModalAsync(timeModal);
+                await component.RespondWithModalAsync(BuildTimeModal(partyKey, party));
+                return;
+            case Constant.TIME_RETRY_KEY:
+                // 시간 입력 오류 메시지에서 다시 시도: 오류 메시지를 지우고 시간 모달을 다시 연다
+                await component.RespondWithModalAsync(BuildTimeModal(partyKey, party));
+                await component.DeleteOriginalResponseAsync();
+                return;
+            case Constant.TIME_CLOSE_KEY:
+                // InitCommands 기본 응답(UpdateAsync) 후 오류 메시지를 삭제한다
+                await component.DeleteOriginalResponseAsync();
                 return;
                 case Constant.MOVE_OWNER_KEY:
                 selectMenuBuilder = new SelectMenuBuilder()
@@ -518,6 +508,29 @@ public class ButtonServices : BaseServices
         }
     }
 
+
+    // 시간 설정 통합 모달 (시간 설정 버튼 + 입력 오류 재시도에서 공유)
+    private static Modal BuildTimeModal(string partyKey, PartyEntity party)
+    {
+        var startPrefill = party.START_DATE ?? DateTime.Now.AddHours(1);
+        return new ModalBuilder()
+            .WithTitle(Constant.TIME_SETTING_KEY)
+            .WithCustomId($"{Constant.DATE_MODAL_KEY}_{partyKey}_{Constant.DATE_MODAL_BOTH}")
+            .AddTextDisplay(Constant.DATE_INPUT_EXAMPLES)
+            .AddTextInput("시작 날짜/시간", Constant.DATE_INPUT_FIELD, TextInputStyle.Short,
+                placeholder: Constant.DATE_INPUT_PLACEHOLDER,
+                required: false,
+                value: startPrefill.ToNaturalInput(),
+                minLength: 0,
+                maxLength: 100)
+            .AddTextInput("만료 날짜/시간 (비워두면 없음)", Constant.DATE_INPUT_FIELD_EXPIRE, TextInputStyle.Short,
+                placeholder: Constant.DATE_INPUT_PLACEHOLDER,
+                required: false,
+                value: party.EXPIRE_DATE.HasValue ? party.EXPIRE_DATE.Value.ToNaturalInput() : null,
+                minLength: 0,
+                maxLength: 100)
+            .Build();
+    }
 
     private async Task UserSetting(SocketMessageComponent component, string[] parts)
     {

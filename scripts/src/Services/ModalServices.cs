@@ -158,6 +158,12 @@ public class ModalServices : BaseServices
         _ = Services.RespondMessageWithExpire(modal);
     }
 
+    // 시간 입력 오류용 재시도/종료 버튼 (다시 시도: 시간 모달 재오픈, 종료: 메시지 삭제)
+    private static MessageComponent BuildRetryButtons(string partyKey) => new ComponentBuilder()
+        .WithButton("다시 시도", $"{Constant.TIME_RETRY_KEY}_{partyKey}", ButtonStyle.Primary)
+        .WithButton("종료", $"{Constant.TIME_CLOSE_KEY}_{partyKey}", ButtonStyle.Secondary)
+        .Build();
+
     // 시작·만료 통합 모달 제출: 미리채움 그대로 제출하면 그 값으로 설정된다
     private async Task UpdateBothTimesAsync(SocketModal modal, string partyKey, PartyEntity party)
     {
@@ -166,13 +172,23 @@ public class ModalServices : BaseServices
 
         if (!DateTimeParser.TryParse(startInput, DateTime.Now, out var parsedStart, out var startClear, out var startError))
         {
-            await modal.ModifyOriginalResponseAsync(m => m.Content = $"{startError}\n{DateTimeParser.HelpText}");
+            var retryButtons = BuildRetryButtons(partyKey);
+            await modal.ModifyOriginalResponseAsync(m =>
+            {
+                m.Content = $"{startError}\n{DateTimeParser.HelpText}";
+                m.Components = retryButtons;
+            });
             _ = Services.RespondMessageWithExpire(modal);
             return;
         }
         if (!DateTimeParser.TryParse(expireInput, DateTime.Now, out var parsedExpire, out var expireClear, out var expireError))
         {
-            await modal.ModifyOriginalResponseAsync(m => m.Content = $"{expireError}\n{DateTimeParser.HelpText}");
+            var retryButtons = BuildRetryButtons(partyKey);
+            await modal.ModifyOriginalResponseAsync(m =>
+            {
+                m.Content = $"{expireError}\n{DateTimeParser.HelpText}";
+                m.Components = retryButtons;
+            });
             _ = Services.RespondMessageWithExpire(modal);
             return;
         }
@@ -371,7 +387,12 @@ public class ModalServices : BaseServices
 
                 if (!DateTimeParser.TryParse(timeInput, DateTime.Now, out var parsedTime, out var isClear, out var parseError))
                 {
-                    await modal.ModifyOriginalResponseAsync(m => m.Content = $"{parseError}\n{DateTimeParser.HelpText}");
+                    var retryButtons = BuildRetryButtons(partyKey);
+                    await modal.ModifyOriginalResponseAsync(m =>
+                    {
+                        m.Content = $"{parseError}\n{DateTimeParser.HelpText}";
+                        m.Components = retryButtons;
+                    });
                     _ = Services.RespondMessageWithExpire(modal);
                     return;
                 }
