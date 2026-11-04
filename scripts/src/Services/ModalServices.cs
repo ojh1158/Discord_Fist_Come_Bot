@@ -65,6 +65,7 @@ public class ModalServices : BaseServices
         if (parts.Length < 2 || !slashCommandServices.TakePending(parts[1], out var pending) || pending is null)
         {
             await modal.ModifyOriginalResponseAsync(m => m.Content = "생성 정보가 만료되었습니다. /파티 명령어로 다시 생성해주세요.");
+            _ = Services.RespondMessageWithExpire(modal);
             return;
         }
 
@@ -76,6 +77,7 @@ public class ModalServices : BaseServices
         if (!DateTimeParser.TryParse(startInput, DateTime.Now, out var parsedStart, out var startClear, out var startError))
         {
             await modal.ModifyOriginalResponseAsync(m => m.Content = $"{startError}\n{DateTimeParser.HelpText}");
+            _ = Services.RespondMessageWithExpire(modal);
             return;
         }
         if (!startClear)
@@ -84,6 +86,7 @@ public class ModalServices : BaseServices
         if (!DateTimeParser.TryParse(expireInput, DateTime.Now, out var parsedExpire, out var expireClear, out var expireError))
         {
             await modal.ModifyOriginalResponseAsync(m => m.Content = $"{expireError}\n{DateTimeParser.HelpText}");
+            _ = Services.RespondMessageWithExpire(modal);
             return;
         }
 
@@ -95,12 +98,14 @@ public class ModalServices : BaseServices
         catch (TimeoutException)
         {
             await modal.ModifyOriginalResponseAsync(m => m.Content = "파티 생성 중입니다. 잠시 후 기능 메뉴에서 시간을 설정해주세요.");
+            _ = Services.RespondMessageWithExpire(modal);
             return;
         }
 
         if (party is null)
         {
             await modal.ModifyOriginalResponseAsync(m => m.Content = "파티 생성에 실패하였습니다.");
+            _ = Services.RespondMessageWithExpire(modal);
             return;
         }
 
@@ -116,6 +121,7 @@ public class ModalServices : BaseServices
             if (!await partyService.SetExpireDate(party.PARTY_KEY, parsedExpire))
             {
                 await modal.ModifyOriginalResponseAsync(m => m.Content = "만료 날짜 설정에 실패하였습니다.");
+                _ = Services.RespondMessageWithExpire(modal);
                 return;
             }
             party.EXPIRE_DATE = parsedExpire;
@@ -125,6 +131,7 @@ public class ModalServices : BaseServices
             if (!await partyService.ClearExpireDate(party.PARTY_KEY))
             {
                 await modal.ModifyOriginalResponseAsync(m => m.Content = "만료 날짜 설정에 실패하였습니다.");
+                _ = Services.RespondMessageWithExpire(modal);
                 return;
             }
             party.EXPIRE_DATE = null;
@@ -160,11 +167,13 @@ public class ModalServices : BaseServices
         if (!DateTimeParser.TryParse(startInput, DateTime.Now, out var parsedStart, out var startClear, out var startError))
         {
             await modal.ModifyOriginalResponseAsync(m => m.Content = $"{startError}\n{DateTimeParser.HelpText}");
+            _ = Services.RespondMessageWithExpire(modal);
             return;
         }
         if (!DateTimeParser.TryParse(expireInput, DateTime.Now, out var parsedExpire, out var expireClear, out var expireError))
         {
             await modal.ModifyOriginalResponseAsync(m => m.Content = $"{expireError}\n{DateTimeParser.HelpText}");
+            _ = Services.RespondMessageWithExpire(modal);
             return;
         }
 
@@ -180,6 +189,7 @@ public class ModalServices : BaseServices
             if (!await partyService.SetStartDate(partyKey, parsedStart))
             {
                 await modal.ModifyOriginalResponseAsync(m => m.Content = "시작 날짜 설정에 실패하였습니다.");
+                _ = Services.RespondMessageWithExpire(modal);
                 return;
             }
             party.START_DATE = parsedStart;
@@ -202,6 +212,7 @@ public class ModalServices : BaseServices
             if (!await partyService.SetExpireDate(partyKey, parsedExpire))
             {
                 await modal.ModifyOriginalResponseAsync(m => m.Content = "만료 날짜 설정에 실패하였습니다.");
+                _ = Services.RespondMessageWithExpire(modal);
                 return;
             }
             party.EXPIRE_DATE = parsedExpire;
@@ -361,6 +372,7 @@ public class ModalServices : BaseServices
                 if (!DateTimeParser.TryParse(timeInput, DateTime.Now, out var parsedTime, out var isClear, out var parseError))
                 {
                     await modal.ModifyOriginalResponseAsync(m => m.Content = $"{parseError}\n{DateTimeParser.HelpText}");
+                    _ = Services.RespondMessageWithExpire(modal);
                     return;
                 }
 
@@ -373,6 +385,7 @@ public class ModalServices : BaseServices
                 if (!timeOk)
                 {
                     await modal.ModifyOriginalResponseAsync(m => m.Content = "날짜 설정에 실패하였습니다.");
+                    _ = Services.RespondMessageWithExpire(modal);
                     return;
                 }
 

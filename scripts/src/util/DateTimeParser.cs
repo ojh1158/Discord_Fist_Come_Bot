@@ -6,7 +6,7 @@ namespace DiscordBot.scripts.src.util;
 /// <summary>모달 자유입력용 한국어 시간 파서 (KST, DateTime.Now 기준).</summary>
 public static class DateTimeParser
 {
-    public const string HelpText = "예: 2026-01-01 23:00 / 11/5 20:00 / 내일 20시 / 모레 19시반 / 금 20시 / 3시간 후 (삭제: 없음)";
+    public const string HelpText = "예: 2026-01-01 23:00 / 11/5 20:00 / 내일 20시 / 모레 19시반 / 금 20시 / 3시간 후 / 22.5=22시30분 (삭제: 없음)";
 
     private static readonly string[] ClearWords =
         ["없음", "미정", "삭제", "지움", "지우기", "제거", "취소", "해제", "-", "x", "X"];
@@ -56,6 +56,28 @@ public static class DateTimeParser
         }
 
         var compact = text.Replace(" ", "");
+
+        // 0) 소수점 시간: 22.5시 → 22:30, 접미사 없이 13시 이상이면 22.5 → 22:30
+        var decSi = Regex.Match(compact, @"^(\d{1,2})\.(\d+)시$");
+        if (decSi.Success)
+        {
+            if (!TryDecimalTime(decSi, out var decHour, out var decMin, out error))
+                return false;
+            result = new DateTime(now.Year, now.Month, now.Day, decHour, decMin, 0);
+            if (result <= now)
+                result = result.AddDays(1);
+            return true;
+        }
+        var decBare = Regex.Match(compact, @"^(\d{1,2})\.(\d{1,2})$");
+        if (decBare.Success && int.Parse(decBare.Groups[1].Value) > 12)
+        {
+            if (!TryDecimalTime(decBare, out var decHour2, out var decMin2, out error))
+                return false;
+            result = new DateTime(now.Year, now.Month, now.Day, decHour2, decMin2, 0);
+            if (result <= now)
+                result = result.AddDays(1);
+            return true;
+        }
 
         // 1) 절대 형식: 2026-01-01 23:00
         if (DateTime.TryParseExact(text, DateTimeFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out result)
@@ -176,49 +198,60 @@ public static class DateTimeParser
                 hasDate = true;
                 rest = rest.Replace(ymd.Value, "");
             }
-            // 11/5
+            // 금요일 / 다음주 금 ("금 8.5" 같은 요일+소수점 시간을 날짜로 오독하지 않도록 월/일보다 먼저 판정)
             else
             {
-                var md = Regex.Match(rest, @"(\d{1,2})[./-](\d{1,2})");
-                if (md.Success)
+                var week = Regex.Match(rest, @"(이번|다음|담)?(일|월|화|수|목|금|토)(요일)?");
+                if (week.Success)
                 {
-                    var (ok, date) = BuildDate(now.Year, int.Parse(md.Groups[1].Value), int.Parse(md.Groups[2].Value));
-                    if (!ok)
-                    {
-                        error = "존재하지 않는 날짜입니다.";
-                        return false;
-                    }
-                    baseDate = date;
+                    var prefix = week.Groups[1].Value;
+                    var target = Weekdays[week.Groups[2].Value];
+                    var diff = ((int)target - (int)now.DayOfWeek + 7) % 7;
+                    if (prefix is "다음" or "담")
+                        diff += 7;
+                    baseDate = now.Date.AddDays(diff);
                     hasDate = true;
-                    rollYearIfPast = true;
-                    rest = rest.Replace(md.Value, "");
+                    rollWeekIfPast = prefix is not ("다음" or "담");
+                    rest = rest.Replace(week.Value, "");
                 }
-                // 금요일 / 다음주 금
+                // 11/5 (월이 13 이상이면 날짜가 아니라 소수점 시간으로 보고 시간 파싱에 맡긴다)
                 else
                 {
-                    var week = Regex.Match(rest, @"(이번|다음|담)?(일|월|화|수|목|금|토)(요일)?");
-                    if (week.Success)
+                    var md = Regex.Match(rest, @"(\d{1,2})[./-](\d{1,2})");
+                    if (md.Success
+                        && int.TryParse(md.Groups[1].Value, out var mdMonth)
+                        && mdMonth >= 1 && mdMonth <= 12)
                     {
-                        var prefix = week.Groups[1].Value;
-                        var target = Weekdays[week.Groups[2].Value];
-                        var diff = ((int)target - (int)now.DayOfWeek + 7) % 7;
-                        if (prefix is "다음" or "담")
-                            diff += 7;
-                        baseDate = now.Date.AddDays(diff);
+                        var (ok, date) = BuildDate(now.Year, mdMonth, int.Parse(md.Groups[2].Value));
+                        if (!ok)
+                        {
+                            error = "존재하지 않는 날짜입니다.";
+                            return false;
+                        }
+                        baseDate = date;
                         hasDate = true;
-                        rollWeekIfPast = prefix is not ("다음" or "담");
-                        rest = rest.Replace(week.Value, "");
+                        rollYearIfPast = true;
+                        rest = rest.Replace(md.Value, "");
                     }
                 }
             }
         }
 
-        // 시간: 20:00 또는 저녁 8시/8시반/8시 30분 (시간의 '시' 뒤에 '간'이 오면 단위이므로 제외)
+        // 시간: 20:00, 저녁 8시/8시반/8시 30분, 22.5(=22시 30분)
+        // (시간의 '시' 뒤에 '간'이 오면 단위이므로 제외)
         var hour = 20;
         var minute = 0;
         var hasTime = false;
 
-        var colon = Regex.Match(rest, @"(\d{1,2}):(\d{1,2})");
+        var dec = Regex.Match(rest, @"^(\d{1,2})\.(\d+)시?$");
+        if (dec.Success)
+        {
+            if (!TryDecimalTime(dec, out hour, out minute, out error))
+                return false;
+            hasTime = true;
+        }
+
+        var colon = Regex.Match(hasTime ? "" : rest, @"(\d{1,2}):(\d{1,2})");
         if (colon.Success)
         {
             hour = int.Parse(colon.Groups[1].Value);
@@ -230,7 +263,7 @@ public static class DateTimeParser
             }
             hasTime = true;
         }
-        else
+        else if (!hasTime)
         {
             var si = Regex.Match(rest, @"(오전|오후|낮|밤|저녁|새벽|아침)?(\d{1,2})시(?!간)(반|(\d{1,2})분?)?");
             if (si.Success)
@@ -302,6 +335,24 @@ public static class DateTimeParser
         else if (rollWeekIfPast && result <= now)
             result = result.AddDays(7);
 
+        return true;
+    }
+
+    private static bool TryDecimalTime(Match m, out int hour, out int minute, out string error)
+    {
+        hour = int.Parse(m.Groups[1].Value);
+        minute = (int)Math.Round(double.Parse("0." + m.Groups[2].Value, CultureInfo.InvariantCulture) * 60);
+        error = "";
+        if (minute >= 60)
+        {
+            hour += 1;
+            minute = 0;
+        }
+        if (hour > 23)
+        {
+            error = "시간이 올바르지 않습니다.";
+            return false;
+        }
         return true;
     }
 
