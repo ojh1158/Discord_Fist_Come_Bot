@@ -9,7 +9,7 @@ public class Constant
     
     public const int MAX_NAME_COUNT = 50;
     
-    public const string VERSION = "2.3.3";
+    public const string VERSION = "2.3.4";
 
     public const string TIME_RETRY_KEY = "시간재시도";
     public const string TIME_CLOSE_KEY = "시간종료";
