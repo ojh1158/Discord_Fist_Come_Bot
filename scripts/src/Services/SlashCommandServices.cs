@@ -35,7 +35,12 @@ public class SlashCommandServices : BaseServices
         ulong OwnerId,
         string OwnerNickname,
         DateTime CreatedAt,
-        Task<PartyEntity?> PartyTask);
+        Task<PartyEntity?> PartyTask)
+    {
+        // 시간 파싱 실패 시 재입력 모달에 이전 입력을 되돌려주기 위한 보관
+        public string? LastStartInput { get; set; }
+        public string? LastExpireInput { get; set; }
+    }
 
     public string AddPending(PendingCreate pending)
     {
@@ -51,6 +56,9 @@ public class SlashCommandServices : BaseServices
 
     public bool TakePending(string id, out PendingCreate? pending) =>
         pendingCreates.TryRemove(id, out pending);
+
+    public bool PeekPending(string id, out PendingCreate? pending) =>
+        pendingCreates.TryGetValue(id, out pending);
 
     public SlashCommandServices(DiscordSocketClient discord, DiscordServices discordServices, GuildService guildService, PartyService partyService, PartyQueueServices partyQueueServices) : base(discordServices)
     {
@@ -90,12 +98,6 @@ public class SlashCommandServices : BaseServices
                     isRequired: false
                 )
         };
-
-        // if (Config.Riot.Enable)
-        // {
-        //     new SlashCommandBuilder()
-        //         .WithName("")
-        // }
 
         // 내용이 다르거나 없는 명령어 생성/업데이트
         foreach (var commandBuilder in array)
@@ -243,23 +245,7 @@ public class SlashCommandServices : BaseServices
             ownerId, ownerName, DateTime.Now, tcs.Task);
         var pendingId = AddPending(pending);
 
-        var modal = new ModalBuilder()
-            .WithTitle("시작 시간 입력")
-            .WithCustomId($"{Constant.DATE_CREATE_KEY}_{pendingId}")
-            .AddTextDisplay(Constant.DATE_CREATE_EXAMPLES)
-            .AddTextInput("날짜/시간 (비워두면 시간 없이 생성)", Constant.DATE_INPUT_FIELD, TextInputStyle.Short,
-                placeholder: Constant.DATE_INPUT_PLACEHOLDER,
-                required: false,
-                value: null,
-                minLength: 0,
-                maxLength: 100)
-            .AddTextInput("만료 날짜/시간 (2일 후 23:59 자동)", Constant.DATE_INPUT_FIELD_EXPIRE, TextInputStyle.Short,
-                placeholder: Constant.DATE_INPUT_PLACEHOLDER,
-                required: false,
-                value: ExtensionMethods.DefaultExpireDate().ToNaturalInput(),
-                minLength: 0,
-                maxLength: 100)
-            .Build();
+        var modal = BuildCreateTimeModal(pendingId, null, ExtensionMethods.DefaultExpireDate().ToNaturalInput());
 
         await command.RespondWithModalAsync(modal);
 
@@ -276,6 +262,26 @@ public class SlashCommandServices : BaseServices
             }
         });
     }
+
+    // 생성 시간 모달 (최초 + 파싱 실패 후 재입력에서 공유, 실패 입력은 그대로 되돌려준다)
+    public static Modal BuildCreateTimeModal(string pendingId, string? startPrefill, string? expirePrefill) =>
+        new ModalBuilder()
+            .WithTitle("시작 시간 입력")
+            .WithCustomId($"{Constant.DATE_CREATE_KEY}_{pendingId}")
+            .AddTextDisplay(Constant.DATE_CREATE_EXAMPLES)
+            .AddTextInput("날짜/시간 (비워두면 시간 없이 생성)", Constant.DATE_INPUT_FIELD, TextInputStyle.Short,
+                placeholder: Constant.DATE_INPUT_PLACEHOLDER,
+                required: false,
+                value: startPrefill,
+                minLength: 0,
+                maxLength: 100)
+            .AddTextInput("만료 날짜/시간 (2일 후 23:59 자동)", Constant.DATE_INPUT_FIELD_EXPIRE, TextInputStyle.Short,
+                placeholder: Constant.DATE_INPUT_PLACEHOLDER,
+                required: false,
+                value: expirePrefill,
+                minLength: 0,
+                maxLength: 100)
+            .Build();
 
     // 모달이 떠 있는 동안 백그라운드에서 파티 본체 생성 (채널 메시지는 자유롭게 사용)
     public async Task<PartyEntity?> BuildPartyAsync(PendingCreate pending)
@@ -296,7 +302,10 @@ public class SlashCommandServices : BaseServices
         if (targetChannel is null)
             return null;
 
-        var msg = await targetChannel.SendMessageAsync("초기화 중입니다...");
+        // 모달 제출 전에는 파티를 공개하지 않는다. 예전 시작시간설정 멘트 + 5분 타임아웃을 그대로 사용한다.
+        // 5분 안에 모달 제출로 내용이 바뀌면 자동 삭제/만료가 취소되고, 미제출이면 메시지 삭제 + DB 만료된다.
+        var msg = await targetChannel.SendMessageAsync($"{Services.ToDiscordUserMention(pending.OwnerId)}님이 {pending.Name} 파티 설정을 하고 있습니다! 잠시만 기다려 주세요...");
+        Services.MessageWithExpire(msg, 300, () => { _ = _partyService.ExpirePartyAsync(msg.Id); });
 
         var appointeeUserIds = await ResolveAppointeesAsync(
             pending.GuildId, pending.AppointeeInput, pending.OwnerId, pending.OwnerNickname);
@@ -329,45 +338,12 @@ public class SlashCommandServices : BaseServices
                 await _partyService.JoinPartyAsync(party.PARTY_KEY, key, value);
             }
 
-            var isFullAlert = party.Members.Count < party.MAX_COUNT_MEMBER &&
-                          party.Members.Count + appointeeUserIds.Count >= party.MAX_COUNT_MEMBER;
-
             var fresh = await _partyService.GetPartyEntityAsync(party.PARTY_KEY);
             if (fresh is not null)
                 party = fresh;
-
-            if (appointeeUserIds.Count > 1)
-            {
-                if (isFullAlert)
-                {
-                    var owner = await Services.client.GetUserAsync(pending.OwnerId);
-                    if (owner is not null)
-                        Services.SendUserAlert(party, owner, Constant.JOIN_AUTO_KEY);
-                }
-
-                var stringBuilder = new StringBuilder();
-
-                stringBuilder.AppendLine($"[**{party.DISPLAY_NAME}**]파티에서 아래의 파티원이 내정자로 선정되었습니다!");
-
-                foreach (var (id, name) in appointeeUserIds)
-                {
-                    stringBuilder.AppendLine($"<@{id}> {name}님이 {ActionType.Join.Comment()}");
-                }
-
-                await targetChannel.SendMessageAsync(stringBuilder.ToString());
-            }
         }
 
-        var updatedEmbed = await Services.UpdatedEmbed(party);
-        var component = Services.UpdatedComponent(party);
-
-        await msg.ModifyAsync(m =>
-        {
-            m.Content = "";
-            m.Embed = updatedEmbed;
-            m.Components = component;
-        });
-
+        // embed 렌더와 내정자 안내는 모달 제출 시점(CreatePartyModalAsync)에서 공개한다.
         return party;
     }
 

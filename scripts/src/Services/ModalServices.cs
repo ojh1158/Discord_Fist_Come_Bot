@@ -1,3 +1,4 @@
+using System.Text;
 using Discord;
 using Discord.WebSocket;
 using DiscordBot.scripts.db.Models;
@@ -59,33 +60,55 @@ public class ModalServices : BaseServices
         await Task.CompletedTask;
     }
 
+    // 파티 생성 시간 입력 실패 시 3지선다 버튼 (pendingId 기준, 파티 확정 전)
+    private static MessageComponent BuildCreateFailButtons(string pendingId) => new ComponentBuilder()
+        .WithButton("파티열기", $"{Constant.CREATE_OPEN_KEY}_{pendingId}", ButtonStyle.Success)
+        .WithButton("다시 입력", $"{Constant.CREATE_RETRY_KEY}_{pendingId}", ButtonStyle.Primary)
+        .WithButton("파티취소", $"{Constant.CREATE_CANCEL_KEY}_{pendingId}", ButtonStyle.Danger)
+        .Build();
+
     // /파티(시간설정) 모달 제출: 백그라운드 생성 결과를 기다렸다가 시작·만료 시간을 합친다
     private async Task CreatePartyModalAsync(SocketModal modal, string[] parts)
     {
-        if (parts.Length < 2 || !slashCommandServices.TakePending(parts[1], out var pending) || pending is null)
+        if (parts.Length < 2 || !slashCommandServices.PeekPending(parts[1], out var pending) || pending is null)
         {
             await modal.ModifyOriginalResponseAsync(m => m.Content = "생성 정보가 만료되었습니다. /파티 명령어로 다시 생성해주세요.");
             _ = Services.RespondMessageWithExpire(modal);
             return;
         }
 
+        var pendingId = parts[1];
         var startInput = modal.Data.Components.FirstOrDefault(c => c.CustomId == Constant.DATE_INPUT_FIELD)?.Value ?? "";
         var expireInput = modal.Data.Components.FirstOrDefault(c => c.CustomId == Constant.DATE_INPUT_FIELD_EXPIRE)?.Value ?? "";
 
         DateTime? startDate = null;
 
-        if (!DateTimeParser.TryParse(startInput, DateTime.Now, out var parsedStart, out var startClear, out var startError))
+        var startValid = DateTimeParser.TryParse(startInput, DateTime.Now, out var parsedStart, out var startClear, out var startError);
+        var expireValid = DateTimeParser.TryParse(expireInput, DateTime.Now, out var parsedExpire, out var expireClear, out var expireError);
+        var failError = !startValid ? startError : !expireValid ? expireError : null;
+        if (failError is not null)
         {
-            await modal.ModifyOriginalResponseAsync(m => m.Content = $"{startError}\n{DateTimeParser.HelpText}");
-            _ = Services.RespondMessageWithExpire(modal);
+            // pending은 유지한다. 파티 본체는 백그라운드에서 계속 준비되고,
+            // 아래 버튼(열기·재입력·취소)에서 이어서 처리하므로 생성이 중간에 멈추지 않는다.
+            pending.LastStartInput = startInput;
+            pending.LastExpireInput = expireInput;
+            var failButtons = BuildCreateFailButtons(pendingId);
+            await modal.ModifyOriginalResponseAsync(m =>
+            {
+                m.Content = $"{failError}\n{DateTimeParser.HelpText}";
+                m.Components = failButtons;
+            });
+            // 대기 안내(5분 자동 만료)와 같은 유효기간을 줘서 버튼이 먼저 사라져 고아가 되지 않게 한다
+            _ = Services.RespondMessageWithExpire(modal, time: 300);
             return;
         }
         if (!startClear)
             startDate = parsedStart;
 
-        if (!DateTimeParser.TryParse(expireInput, DateTime.Now, out var parsedExpire, out var expireClear, out var expireError))
+        // 파싱 성공 시점에 pending 소유권을 가져간다 (중복 제출·버튼 경합 방지)
+        if (!slashCommandServices.TakePending(pendingId, out _))
         {
-            await modal.ModifyOriginalResponseAsync(m => m.Content = $"{expireError}\n{DateTimeParser.HelpText}");
+            await modal.ModifyOriginalResponseAsync(m => m.Content = "생성 정보가 만료되었습니다. /파티 명령어로 다시 생성해주세요.");
             _ = Services.RespondMessageWithExpire(modal);
             return;
         }
@@ -138,6 +161,25 @@ public class ModalServices : BaseServices
         }
 
         await Services.UpdateMessage(modal, party, false, "");
+
+        // 모달 제출 시점에 파티 공개와 함께 내정자 안내를 보낸다 (제출 전 노출 방지).
+        if (party.Members.Count > 1)
+        {
+            if (party.Members.Count >= party.MAX_COUNT_MEMBER)
+            {
+                var owner = await Services.client.GetUserAsync(pending.OwnerId);
+                if (owner is not null)
+                    Services.SendUserAlert(party, owner, Constant.JOIN_AUTO_KEY);
+            }
+
+            var stringBuilder = new StringBuilder();
+            stringBuilder.AppendLine($"[**{party.DISPLAY_NAME}**]파티에서 아래의 파티원이 내정자로 선정되었습니다!");
+            foreach (var member in party.Members)
+            {
+                stringBuilder.AppendLine($"<@{member.USER_ID}> {member.USER_NICKNAME}님이 {DiscordBot.scripts.src.party.ActionType.Join.Comment()}");
+            }
+            await modal.Channel.SendMessageAsync(stringBuilder.ToString());
+        }
 
         var done = "파티를 생성하였습니다!";
         if (startDate.HasValue)

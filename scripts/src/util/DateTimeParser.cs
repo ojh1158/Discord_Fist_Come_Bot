@@ -6,7 +6,7 @@ namespace DiscordBot.scripts.src.util;
 /// <summary>모달 자유입력용 한국어 시간 파서 (KST, DateTime.Now 기준).</summary>
 public static class DateTimeParser
 {
-    public const string HelpText = "예: 2026-01-01 23:00 / 11/5 20:00 / 내일 20시 / 모레 19시반 / 금 20시 / 3시간 후 / 22.5=22시30분 / 23=23시 (삭제: 없음)";
+    public const string HelpText = "예: 2026-01-01 23:00 / 11/5 20:00 / 내일 20시 / 모레 19시반 / 금 20시 / 3시간 후 / 22.5=22시30분 / 23=23시 / 24=0시 (삭제: 없음)";
 
     private static readonly string[] ClearWords =
         ["없음", "미정", "삭제", "지움", "지우기", "제거", "취소", "해제", "-", "x", "X"];
@@ -243,11 +243,16 @@ public static class DateTimeParser
         var minute = 0;
         var hasTime = false;
 
+        // 24시는 0시로 취급 (당일 자정 이후 = 다음날 0시, hasDate 분기에서 +1일 처리)
+        var hourIs24 = false;
+
         var dec = Regex.Match(rest, @"^(\d{1,2})\.(\d+)시?$");
         if (dec.Success)
         {
             if (!TryDecimalTime(dec, out hour, out minute, out error))
                 return false;
+            if (dec.Groups[1].Value == "24")
+                hourIs24 = true;
             hasTime = true;
         }
 
@@ -256,21 +261,31 @@ public static class DateTimeParser
         {
             hour = int.Parse(colon.Groups[1].Value);
             minute = int.Parse(colon.Groups[2].Value);
-            if (hour > 23 || minute > 59)
+            if (hour > 24 || minute > 59)
             {
-                error = "시간이 올바르지 않습니다 (0~23시, 0~59분).";
+                error = "시간이 올바르지 않습니다 (0~24시, 0~59분).";
                 return false;
+            }
+            if (hour == 24)
+            {
+                hour = 0;
+                hourIs24 = true;
             }
             hasTime = true;
         }
         else if (!hasTime && Regex.IsMatch(rest, @"^\d{1,2}$"))
         {
-            // 숫자만: 23 → 23시 정각 (오늘, 지났으면 내일 / 오늘·날짜 지정과도 조합 가능)
+            // 숫자만: 23 → 23시 정각, 24 → 0시 (오늘, 지났으면 내일 / 오늘·날짜 지정과도 조합 가능)
             hour = int.Parse(rest);
-            if (hour > 23)
+            if (hour > 24)
             {
-                error = "시간이 올바르지 않습니다 (0~23시).";
+                error = "시간이 올바르지 않습니다 (0~24시).";
                 return false;
+            }
+            if (hour == 24)
+            {
+                hour = 0;
+                hourIs24 = true;
             }
             minute = 0;
             hasTime = true;
@@ -282,12 +297,20 @@ public static class DateTimeParser
             {
                 var meridiem = si.Groups[1].Value;
                 hour = int.Parse(si.Groups[2].Value);
-                if (hour > 23 || (meridiem.Length > 0 && hour > 12))
+                if (hour > 24 || (meridiem.Length > 0 && hour > 12) || (hour == 24 && meridiem.Length > 0))
                 {
-                    error = "시간이 올바르지 않습니다.";
+                    error = "시간이 올바르지 않습니다 (0~24시).";
                     return false;
                 }
-                hour = ApplyMeridiem(meridiem, hour);
+                if (hour == 24)
+                {
+                    hour = 0;
+                    hourIs24 = true;
+                }
+                else
+                {
+                    hour = ApplyMeridiem(meridiem, hour);
+                }
                 if (si.Groups[3].Value == "반")
                     minute = 30;
                 else if (si.Groups[4].Success)
@@ -336,6 +359,10 @@ public static class DateTimeParser
             return false;
         }
 
+        // 24시 입력은 해당 날짜의 자정 이후 = 다음날 0시로 취급
+        if (hourIs24)
+            result = result.AddDays(1);
+
         if (explicitToday && result <= now)
         {
             error = "이미 지난 시간입니다. 내일 이후로 입력해주세요.";
@@ -355,14 +382,22 @@ public static class DateTimeParser
         hour = int.Parse(m.Groups[1].Value);
         minute = (int)Math.Round(double.Parse("0." + m.Groups[2].Value, CultureInfo.InvariantCulture) * 60);
         error = "";
+        if (hour > 24)
+        {
+            error = "시간이 올바르지 않습니다 (0~24시).";
+            return false;
+        }
         if (minute >= 60)
         {
             hour += 1;
             minute = 0;
         }
-        if (hour > 23)
+        // 24시는 0시로 취급 (날짜 이월은 호출 측의 기존 롤오버 로직이 처리)
+        if (hour == 24)
+            hour = 0;
+        else if (hour > 24)
         {
-            error = "시간이 올바르지 않습니다.";
+            error = "시간이 올바르지 않습니다 (0~24시).";
             return false;
         }
         return true;

@@ -14,6 +14,11 @@ public class Constant
     public const string TIME_RETRY_KEY = "시간재시도";
     public const string TIME_CLOSE_KEY = "시간종료";
 
+    // 파티 생성 모달 시간 입력 실패 시 3지선다 (pendingId 기준, 파티 확정 전)
+    public const string CREATE_OPEN_KEY = "파티열기";
+    public const string CREATE_RETRY_KEY = "생성재입력";
+    public const string CREATE_CANCEL_KEY = "생성취소";
+
     public const string JOIN_KEY = "참가";
     public const string LEAVE_KEY = "나가기";
     public const string CLOSE_KEY = "일시정지";

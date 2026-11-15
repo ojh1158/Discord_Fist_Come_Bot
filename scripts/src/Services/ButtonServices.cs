@@ -20,8 +20,9 @@ public class ButtonServices : BaseServices
     private readonly GuildService guildService;
     private readonly PartyQueueServices partyQueueServices;
     private readonly TeamTool teamTool;
-    
-    public ButtonServices(DiscordServices services, UserService userService, PartyQueueServices partyQueueServices, PartyService partyService, GuildService guildService, TeamTool teamTool) : base(services)
+    private readonly SlashCommandServices slashCommandServices;
+
+    public ButtonServices(DiscordServices services, UserService userService, PartyQueueServices partyQueueServices, PartyService partyService, GuildService guildService, TeamTool teamTool, SlashCommandServices slashCommandServices) : base(services)
     {
         Services.client.ButtonExecuted += HandleButtonAsync;
         this.userService = userService;
@@ -29,6 +30,7 @@ public class ButtonServices : BaseServices
         this.guildService = guildService;
         this.partyQueueServices = partyQueueServices;
         this.teamTool = teamTool;
+        this.slashCommandServices = slashCommandServices;
     }
     
     private async Task HandleButtonAsync(SocketMessageComponent component)
@@ -84,8 +86,43 @@ public class ButtonServices : BaseServices
             return;
         
         var partyKey = parts[messageIdIndex];
-        
+
+        // 만료된 파티의 팀 버튼: 다시 만들기는 차단, 삭제는 메시지만 정리한다.
+        // 팀 결과 메시지를 "작업 중..."으로 덮어쓰지 않도록 ack(InitCommands) 전에 처리한다.
+        // GetPartyEntityAsync는 만료 파티를 null로 돌려주므로 null도 만료로 취급한다.
+        if (action is Constant.TEAM_AGAIN_KEY or Constant.TEAM_REMOVE_KEY)
+        {
+            var preview = await partyService.GetPartyEntityAsync(partyKey);
+            if (preview is null || preview.IS_EXPIRED)
+            {
+                if (action == Constant.TEAM_AGAIN_KEY)
+                {
+                    await Services.RespondMessageWithExpire(component, time: 10, message: "만료된 파티에서는 팀을 다시 만들 수 없습니다.");
+                }
+                else
+                {
+                    try
+                    {
+                        await component.Message.DeleteAsync();
+                        await Services.RespondMessageWithExpire(component, time: 10, message: "팀 메시지를 삭제했습니다.");
+                    }
+                    catch
+                    {
+                        await Services.RespondMessageWithExpire(component, time: 10, message: "팀 메시지 삭제에 실패했습니다.");
+                    }
+                }
+                return;
+            }
+        }
+
         await InitCommands(component, action);
+
+        // 생성 모달 시간 실패 후 3지선다: pendingId 기준이라 파티 조회 전에 처리한다
+        if (action is Constant.CREATE_OPEN_KEY or Constant.CREATE_RETRY_KEY or Constant.CREATE_CANCEL_KEY)
+        {
+            await ProcessCreateFailActionAsync(component, action, partyKey);
+            return;
+        }
 
         var isAllMessage = false;
         var message = "알 수 없는 오류가 나타났습니다.";
@@ -508,6 +545,147 @@ public class ButtonServices : BaseServices
         }
     }
 
+
+    // 생성 모달 시간 입력 실패 후 3지선다: pendingId 기준이라 파티 조회 없이 처리한다
+    private async Task ProcessCreateFailActionAsync(SocketMessageComponent component, string action, string pendingId)
+    {
+        if (action == Constant.CREATE_OPEN_KEY)
+        {
+            // "파티열기": 시간 없이 그대로 공개한다
+            if (!slashCommandServices.TakePending(pendingId, out var createPending) || createPending is null)
+            {
+                await component.ModifyOriginalResponseAsync(m =>
+                {
+                    m.Content = "이미 처리되었거나 만료되었습니다. /파티 명령어로 다시 생성해주세요.";
+                    m.Components = null;
+                });
+                return;
+            }
+
+            PartyEntity? openParty;
+            try
+            {
+                openParty = await createPending.PartyTask.WaitAsync(TimeSpan.FromSeconds(60));
+            }
+            catch (TimeoutException)
+            {
+                await component.ModifyOriginalResponseAsync(m =>
+                {
+                    m.Content = "파티 생성 중입니다. 잠시 후 기능 메뉴에서 시간을 설정해주세요.";
+                    m.Components = null;
+                });
+                _ = Services.RespondMessageWithExpire(component);
+                return;
+            }
+
+            if (openParty is null)
+            {
+                await component.ModifyOriginalResponseAsync(m =>
+                {
+                    m.Content = "파티 생성에 실패하였습니다.";
+                    m.Components = null;
+                });
+                _ = Services.RespondMessageWithExpire(component);
+                return;
+            }
+
+            await Services.UpdateMessage(component, openParty, false, "");
+
+            if (openParty.Members.Count > 1)
+            {
+                if (openParty.Members.Count >= openParty.MAX_COUNT_MEMBER)
+                {
+                    var openOwner = await Services.client.GetUserAsync(createPending.OwnerId);
+                    if (openOwner is not null)
+                        Services.SendUserAlert(openParty, openOwner, Constant.JOIN_AUTO_KEY);
+                }
+
+                var openNotice = new StringBuilder();
+                openNotice.AppendLine($"[**{openParty.DISPLAY_NAME}**]파티에서 아래의 파티원이 내정자로 선정되었습니다!");
+                foreach (var member in openParty.Members)
+                {
+                    openNotice.AppendLine($"<@{member.USER_ID}> {member.USER_NICKNAME}님이 {ActionType.Join.Comment()}");
+                }
+                await component.Channel.SendMessageAsync(openNotice.ToString());
+            }
+
+            var openDone = "파티를 생성하였습니다! (시간 미지정)";
+            if (openParty.EXPIRE_DATE.HasValue)
+                openDone += $"\n만료: {openParty.EXPIRE_DATE:yyyy-MM-dd HH:mm} ({openParty.EXPIRE_DATE.Value.ToDiscordRelativeTimestamp()})";
+
+            await component.ModifyOriginalResponseAsync(m =>
+            {
+                m.Content = openDone;
+                m.Components = null;
+            });
+            _ = Services.RespondMessageWithExpire(component);
+            return;
+        }
+
+        if (action == Constant.CREATE_RETRY_KEY)
+        {
+            // "다시 입력": 이전 입력을 되돌린 생성 모달을 다시 연다
+            if (!slashCommandServices.PeekPending(pendingId, out var retryPending) || retryPending is null)
+            {
+                await component.RespondAsync("생성 정보가 만료되었습니다. /파티 명령어로 다시 생성해주세요.", ephemeral: true);
+                return;
+            }
+            await component.RespondWithModalAsync(SlashCommandServices.BuildCreateTimeModal(
+                pendingId,
+                retryPending.LastStartInput,
+                string.IsNullOrEmpty(retryPending.LastExpireInput)
+                    ? ExtensionMethods.DefaultExpireDate().ToNaturalInput()
+                    : retryPending.LastExpireInput));
+            await component.DeleteOriginalResponseAsync();
+            return;
+        }
+
+        // "파티취소": 준비 중이던 파티를 만료하고 대기 메시지를 정리한다
+        if (!slashCommandServices.TakePending(pendingId, out var cancelPending) || cancelPending is null)
+        {
+            await component.ModifyOriginalResponseAsync(m =>
+            {
+                m.Content = "이미 처리되었거나 만료되었습니다.";
+                m.Components = null;
+            });
+            return;
+        }
+
+        PartyEntity? cancelParty = null;
+        try
+        {
+            cancelParty = await cancelPending.PartyTask.WaitAsync(TimeSpan.FromSeconds(60));
+        }
+        catch (TimeoutException)
+        {
+            // 백그라운드 생성이 끝나지 않아도 DB행은 5분 후 자동 만료로 수거된다
+        }
+
+        if (cancelParty is not null)
+        {
+            await partyService.ExpirePartyAsync(cancelParty.MESSAGE_KEY);
+            try
+            {
+                var cancelChannel = await Services.client.GetChannelAsync(cancelPending.ChannelId) as ISocketMessageChannel;
+                var placeholder = cancelChannel is not null
+                    ? await cancelChannel.GetMessageAsync(cancelParty.MESSAGE_KEY) as IUserMessage
+                    : null;
+                if (placeholder is not null)
+                    await placeholder.DeleteAsync();
+            }
+            catch
+            {
+                // 정리 실패는 무시 (5분 후 자동 만료로 수거됨)
+            }
+        }
+
+        await component.ModifyOriginalResponseAsync(m =>
+        {
+            m.Content = "파티 생성을 취소하였습니다.";
+            m.Components = null;
+        });
+        _ = Services.RespondMessageWithExpire(component);
+    }
 
     // 시간 설정 통합 모달 (시간 설정 버튼 + 입력 오류 재시도에서 공유)
     private static Modal BuildTimeModal(string partyKey, PartyEntity party)
